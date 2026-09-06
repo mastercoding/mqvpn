@@ -1,8 +1,19 @@
 # mqvpn Control API — Wire Protocol Reference
 
-The mqvpn server exposes a JSON control API over TCP. This document is the
-authoritative wire-protocol contract for all clients, including the Go
-Prometheus exporter.
+mqvpn exposes a JSON control API over TCP. This document is the authoritative
+wire-protocol contract for all consumers, including the Go Prometheus exporter.
+
+The API has two modes, decided by the mode the daemon is running in:
+
+- **Server mode** — the management and monitoring commands in §5.1–5.8. This is
+  what the Prometheus exporter and `mqvpn --status` speak.
+- **Client mode** — a single command, `get_client_status` (§5.9), reporting the
+  local client's own tunnel state and per-path detail.
+
+A command issued against the wrong mode's socket answers
+`{"ok":false,"error":"server-only command"}` (or `"client-only command"`)
+rather than `"unknown cmd"`, so a consumer can distinguish "this build is too
+old" from "you are connected to the wrong end".
 
 ---
 
@@ -39,6 +50,16 @@ sudo mqvpn --mode server ... --control-port 9090
 
 # Bind to a specific address
 sudo mqvpn --mode server ... --control-port 9090 --control-addr 127.0.0.1
+
+# Same knob in client mode
+sudo mqvpn --mode client ... --control-port 9091
+```
+
+Or in either `server.conf` or `client.conf`:
+
+```ini
+[Control]
+Listen = 127.0.0.1:9091
 ```
 
 ### Security
@@ -478,6 +499,83 @@ Requires that the server was built with `XQC_ENABLE_FEC`.
 
 ---
 
+### 5.9 `get_client_status` *(client mode only)*
+
+Return this client's tunnel state and per-path detail. This is the client-side
+counterpart to `get_status` (§5.5), and the only command a client-mode control
+socket serves.
+
+**Request**
+
+```json
+{"cmd":"get_client_status"}
+```
+
+**Response**
+
+```json
+{
+  "ok":true,"mode":"client","state":"established",
+  "bytes_tx":12345678,"bytes_rx":9876543,"srtt_ms":31,
+  "dgram_sent":89012,"dgram_recv":84551,
+  "dgram_lost":421,"dgram_acked":88341,
+  "tcp_flows_active":1,"n_paths":2,
+  "paths":[
+    {"name":"eth0","status":"active","srtt_ms":28,"bytes_tx":6000,"bytes_rx":30000},
+    {"name":"wwan0","status":"active","srtt_ms":44,"bytes_tx":6345,"bytes_rx":37890}
+  ]
+}
+```
+
+**Top-level fields**
+
+| Field              | Type   | Description                                                                 |
+|--------------------|--------|-----------------------------------------------------------------------------|
+| `mode`             | string | Always `"client"`. Lets a consumer confirm which end it reached.            |
+| `state`            | string | `idle`, `connecting`, `authenticating`, `tunnel_ready`, `established`, `reconnecting`, `closed`, or `unknown`. Stable labels for `mqvpn_client_state_t`; the same names the platform's `state: X → Y` log line uses. |
+| `bytes_tx`         | uint64 | TUN bytes sent into the tunnel                                              |
+| `bytes_rx`         | uint64 | TUN bytes received from the tunnel                                          |
+| `srtt_ms`          | int    | Connection-level smoothed RTT, `mqvpn_stats_t.srtt_ms`                      |
+| `dgram_sent`       | uint64 | QUIC datagrams sent                                                         |
+| `dgram_recv`       | uint64 | QUIC datagrams forwarded to the TUN                                         |
+| `dgram_lost`       | uint64 | QUIC datagrams declared lost                                                |
+| `dgram_acked`      | uint64 | QUIC datagrams acknowledged                                                 |
+| `tcp_flows_active` | uint64 | Hybrid mode: live TCP-lane flows. 0 when hybrid is off.                     |
+| `n_paths`          | int    | Number of entries in `paths`                                                |
+| `paths`            | array  | Per-path objects (see below)                                                |
+
+**Path object**
+
+| Field      | Type   | Description                                                                 |
+|------------|--------|-----------------------------------------------------------------------------|
+| `name`     | string | Interface name (`mqvpn_path_info_t.name`), e.g. `eth0`. Emitted through a character-class filter (`[A-Za-z0-9._:-]`, anything else becomes `_`) since nothing validates a kernel interface name for JSON safety. |
+| `status`   | string | `pending`, `active`, `degraded`, `standby`, or `closed` — `mqvpn_path_status_string()`. Unlike `get_status`'s `state`/`state_label` pair, this is the mqvpn **lifecycle** status, not the raw xquic transport path state. |
+| `srtt_ms`  | int    | Smoothed RTT for this path                                                  |
+| `bytes_tx` | uint64 | Bytes sent on this path                                                     |
+| `bytes_rx` | uint64 | Bytes received on this path                                                 |
+
+> **Narrower than `get_status` by design.** The server's path objects carry
+> `min_rtt_ms`, `cwnd`, `in_flight`, `pkt_sent`, `pkt_recv`, `pkt_lost` and
+> `reinject_tx_bytes`, all sourced from `mqvpn_path_stats_t`. The client does
+> not expose that struct — `mqvpn_client_get_paths()` returns the smaller
+> `mqvpn_path_info_t`. Those fields are **absent** here rather than present and
+> zero, so a consumer cannot mistake "not available on this end" for "measured
+> zero". Widening the client's public path accessor would be a separate,
+> larger change.
+
+**Response — errors**
+
+```json
+{"ok":false,"error":"stats unavailable"}
+{"ok":false,"error":"server-only command"}
+```
+
+- `"stats unavailable"` — `mqvpn_client_get_stats()` failed; the client handle
+  is not in a queryable state.
+- `"server-only command"` — you sent a §5.1–5.8 command to a client socket.
+
+---
+
 ## 6. Error Reference
 
 | Error string             | Returned by                                    |
@@ -492,6 +590,9 @@ Requires that the server was built with `XQC_ENABLE_FEC`.
 | `"user not found"`       | `remove_user`, `get_fec_stats`                 |
 | `"user required"`        | `get_fec_stats`                                |
 | `"fec not built"`        | `get_fec_stats`, `get_all_fec_stats`           |
+| `"stats unavailable"`    | `get_client_status`                            |
+| `"server-only command"`  | a §5.1–5.8 command sent to a client socket     |
+| `"client-only command"`  | `get_client_status` sent to a server socket    |
 
 ---
 
@@ -576,6 +677,9 @@ echo '{"cmd":"get_fec_stats","user":"alice"}' | nc -q1 127.0.0.1 9090
 
 # Query FEC counters for ALL active sessions (bulk; preferred for scrapers)
 echo '{"cmd":"get_all_fec_stats"}' | nc -q1 127.0.0.1 9090
+
+# Query the LOCAL CLIENT's own state and per-path detail (client mode)
+echo '{"cmd":"get_client_status"}' | nc -q1 127.0.0.1 9091
 
 # List registered users
 echo '{"cmd":"list_users"}' | nc -q1 127.0.0.1 9090

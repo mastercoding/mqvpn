@@ -2,9 +2,9 @@
 // Copyright (c) 2026 mp0rta and mqvpn contributors
 
 /*
- * control_socket.c — TCP control API for mqvpn server
+ * control_socket.c — TCP control API for mqvpn
  *
- * Supported JSON commands:
+ * Server-mode commands (ctrl_socket_create):
  *
  *   {"cmd":"add_user",    "name":"alice","key":"alice-secret"}
  *   {"cmd":"remove_user", "name":"alice"}
@@ -15,6 +15,15 @@
  *   {"cmd":"get_fec_stats","user":"alice"}
  *   {"cmd":"get_all_fec_stats"}
  *   {"cmd":"get_reorder_stats"}
+ *
+ * Client-mode command (ctrl_socket_create_client):
+ *
+ *   {"cmd":"get_client_status"}
+ *
+ * A command issued against the wrong mode's socket answers
+ * {"ok":false,"error":"server-only command"} / "client-only command" rather
+ * than "unknown cmd", so a caller can tell "this build is too old" from "you
+ * are talking to the wrong end".
  *
  * Responses:
  *   {"ok":true}
@@ -37,6 +46,12 @@
  *    "per_flow_limit_drop_count":N,"reset_discard_count":N,"delivered_count":N,
  *    "added_latency_p99_ms":F,"added_latency_max_ms":F,
  *    "added_latency_buffered_p99_ms":F}}
+ *   {"ok":true,"mode":"client","state":"established",
+ *    "bytes_tx":X,"bytes_rx":Y,"srtt_ms":N,
+ *    "dgram_sent":S,"dgram_recv":R,"dgram_lost":L,"dgram_acked":A,
+ *    "tcp_flows_active":N,"n_paths":N,
+ *    "paths":[{"name":"eth0","status":"active","srtt_ms":N,
+ *              "bytes_tx":X,"bytes_rx":Y}, ...]}
  */
 
 #include "control_socket.h"
@@ -92,7 +107,10 @@ struct ctrl_socket_s {
     int listen_fd;
     struct event *ev_accept;
     struct event_base *eb;
+    /* Exactly one of these is non-NULL; which one decides the command set.
+     * The dispatch table's per-row client_ok flag is the single gate. */
     mqvpn_server_t *server;
+    mqvpn_client_t *client;
     /* Borrowed platform-owned RX offload counters; see ctrl_socket_create's
      * doc for why these do not travel through mqvpn_stats_t. NULL = report 0. */
     const uint64_t *gro_receives;
@@ -458,23 +476,139 @@ ctrl_cmd_get_reorder_stats(const char *req, char *resp, size_t resp_len,
  * answers (get_stats' udp_rx_* pair) come from platform-owned state that
  * never crosses the library ABI. Handlers that only need the server open
  * with `mqvpn_server_t *server = cs->server;` and are otherwise unchanged. */
+/* ── Client-mode commands ────────────────────────────────────────────────── */
+
+/* Stable label for mqvpn_client_state_t. The numeric enum is public
+ * (libmqvpn.h) but consumers should not have to track its integer values, and
+ * the platform's own "state: X -> Y" log line already uses these names. */
+static const char *
+ctrl_client_state_label(mqvpn_client_state_t st)
+{
+    switch (st) {
+    case MQVPN_STATE_IDLE: return "idle";
+    case MQVPN_STATE_CONNECTING: return "connecting";
+    case MQVPN_STATE_AUTHENTICATING: return "authenticating";
+    case MQVPN_STATE_TUNNEL_READY: return "tunnel_ready";
+    case MQVPN_STATE_ESTABLISHED: return "established";
+    case MQVPN_STATE_RECONNECTING: return "reconnecting";
+    case MQVPN_STATE_CLOSED: return "closed";
+    default: return "unknown";
+    }
+}
+
+/* Interface names come from the kernel via mqvpn_path_info_t.name and are
+ * emitted inside a JSON string. Linux permits almost any byte except '/' and
+ * NUL in an interface name, so rather than reason about which of those need
+ * escaping, restrict the emitted form to a character class that needs none.
+ * Same defensive posture as get_status's reliance on add_user validation,
+ * made local because nothing validates an interface name for us. */
+static void
+ctrl_sanitize_ifname(const char *in, size_t in_len, char *out, size_t out_len)
+{
+    size_t j = 0;
+    /* in_len bounds the read: mqvpn_path_info_t.name is a fixed char[16] and
+     * a 16-character interface name leaves no room for the terminator, so
+     * this must not rely on one being present. */
+    for (size_t i = 0; i < in_len && in[i] != '\0' && j + 1 < out_len; i++) {
+        unsigned char c = (unsigned char)in[i];
+        int ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                 (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' || c == ':';
+        out[j++] = ok ? (char)c : '_';
+    }
+    out[j] = '\0';
+}
+
+static int
+ctrl_cmd_get_client_status(const char *req, char *resp, size_t resp_len,
+                           ctrl_socket_t *cs)
+{
+    mqvpn_client_t *client = cs->client;
+    (void)req;
+
+    mqvpn_stats_t st = {0};
+    st.struct_size = sizeof(st);
+    if (mqvpn_client_get_stats(client, &st) != MQVPN_OK)
+        return snprintf(resp, resp_len, "{\"ok\":false,\"error\":\"stats unavailable\"}");
+
+    mqvpn_path_info_t paths[MQVPN_MAX_PATHS];
+    memset(paths, 0, sizeof(paths));
+    int n_paths = 0;
+    if (mqvpn_client_get_paths(client, paths, MQVPN_MAX_PATHS, &n_paths) != MQVPN_OK)
+        n_paths = 0;
+    if (n_paths < 0) n_paths = 0;
+    if (n_paths > MQVPN_MAX_PATHS) n_paths = MQVPN_MAX_PATHS;
+
+    /* Same truncation discipline as get_status: any append that would not fit
+     * abandons the body and substitutes the small error envelope, so a
+     * half-written object never reaches the wire. The worst case here is 8
+     * paths and cannot approach resp_len, but the shape stays uniform. */
+    int pos = 0;
+    int truncated = 0;
+    int w;
+
+#define APPEND(...)                                                    \
+    do {                                                               \
+        w = snprintf(resp + pos, resp_len - (size_t)pos, __VA_ARGS__); \
+        if (w < 0 || (size_t)(pos + w) >= resp_len) {                  \
+            truncated = 1;                                             \
+            goto get_client_status_done;                               \
+        }                                                              \
+        pos += w;                                                      \
+    } while (0)
+
+    APPEND("{\"ok\":true,\"mode\":\"client\",\"state\":\"%s\","
+           "\"bytes_tx\":%" PRIu64 ",\"bytes_rx\":%" PRIu64 ",\"srtt_ms\":%d,"
+           "\"dgram_sent\":%" PRIu64 ",\"dgram_recv\":%" PRIu64 ","
+           "\"dgram_lost\":%" PRIu64 ",\"dgram_acked\":%" PRIu64 ","
+           "\"tcp_flows_active\":%" PRIu64 ",\"n_paths\":%d,\"paths\":[",
+           ctrl_client_state_label(mqvpn_client_get_state(client)), st.bytes_tx,
+           st.bytes_rx, st.srtt_ms, st.dgram_sent, st.dgram_recv, st.dgram_lost,
+           st.dgram_acked, st.tcp_flows_active, n_paths);
+
+    for (int i = 0; i < n_paths; i++) {
+        char name[sizeof(paths[i].name) + 1];
+        ctrl_sanitize_ifname(paths[i].name, sizeof(paths[i].name), name, sizeof(name));
+        if (i > 0) APPEND(",");
+        APPEND("{\"name\":\"%s\",\"status\":\"%s\",\"srtt_ms\":%d,"
+               "\"bytes_tx\":%" PRIu64 ",\"bytes_rx\":%" PRIu64 "}",
+               name, mqvpn_path_status_string(paths[i].status), paths[i].srtt_ms,
+               paths[i].bytes_tx, paths[i].bytes_rx);
+    }
+
+    APPEND("]}");
+
+get_client_status_done:
+#undef APPEND
+    if (truncated)
+        return snprintf(resp, resp_len,
+                        "{\"ok\":false,\"error\":\"response too large\"}");
+    return pos;
+}
+
 typedef int (*ctrl_cmd_fn)(const char *req, char *resp, size_t resp_len,
                            ctrl_socket_t *cs);
 
-/* Keep in sync (and in order) with the file-header command list. */
+/* Keep in sync (and in order) with the file-header command list.
+ *
+ * `client` marks the mode a row belongs to: 0 = server socket only, 1 = client
+ * socket only. Every server handler dereferences cs->server and every client
+ * handler dereferences cs->client, so this column is what keeps a
+ * wrong-mode request from reaching a NULL. */
 static const struct {
     const char *name;
     ctrl_cmd_fn fn;
+    int client;
 } ctrl_cmds[] = {
-    {"add_user", ctrl_cmd_add_user},
-    {"remove_user", ctrl_cmd_remove_user},
-    {"list_users", ctrl_cmd_list_users},
-    {"get_stats", ctrl_cmd_get_stats},
-    {"get_status", ctrl_cmd_get_status},
-    {"get_build_info", ctrl_cmd_get_build_info},
-    {"get_fec_stats", ctrl_cmd_get_fec_stats},
-    {"get_all_fec_stats", ctrl_cmd_get_all_fec_stats},
-    {"get_reorder_stats", ctrl_cmd_get_reorder_stats},
+    {"add_user", ctrl_cmd_add_user, 0},
+    {"remove_user", ctrl_cmd_remove_user, 0},
+    {"list_users", ctrl_cmd_list_users, 0},
+    {"get_stats", ctrl_cmd_get_stats, 0},
+    {"get_status", ctrl_cmd_get_status, 0},
+    {"get_build_info", ctrl_cmd_get_build_info, 0},
+    {"get_fec_stats", ctrl_cmd_get_fec_stats, 0},
+    {"get_all_fec_stats", ctrl_cmd_get_all_fec_stats, 0},
+    {"get_reorder_stats", ctrl_cmd_get_reorder_stats, 0},
+    {"get_client_status", ctrl_cmd_get_client_status, 1},
 };
 
 static int
@@ -485,9 +619,14 @@ dispatch(const char *req, char *resp, size_t resp_len, ctrl_socket_t *cs)
     if (!v || json_read_string(v, cmd, sizeof(cmd)) < 0)
         return snprintf(resp, resp_len, "{\"ok\":false,\"error\":\"missing cmd\"}");
 
-    for (size_t i = 0; i < sizeof(ctrl_cmds) / sizeof(ctrl_cmds[0]); i++)
-        if (strcmp(cmd, ctrl_cmds[i].name) == 0)
-            return ctrl_cmds[i].fn(req, resp, resp_len, cs);
+    int is_client = (cs->client != NULL);
+    for (size_t i = 0; i < sizeof(ctrl_cmds) / sizeof(ctrl_cmds[0]); i++) {
+        if (strcmp(cmd, ctrl_cmds[i].name) != 0) continue;
+        if (ctrl_cmds[i].client != is_client)
+            return snprintf(resp, resp_len, "{\"ok\":false,\"error\":\"%s\"}",
+                            is_client ? "server-only command" : "client-only command");
+        return ctrl_cmds[i].fn(req, resp, resp_len, cs);
+    }
 
     return snprintf(resp, resp_len, "{\"ok\":false,\"error\":\"unknown cmd\"}");
 }
@@ -641,12 +780,13 @@ ctrl_on_accept(evutil_socket_t fd, short what, void *arg)
 
 /* ── Public API ──────────────────────────────────────────────────────────── */
 
-ctrl_socket_t *
-ctrl_socket_create(struct event_base *eb, const char *addr, int port,
-                   mqvpn_server_t *server, const uint64_t *gro_receives,
-                   const uint64_t *gro_datagrams)
+/* Listener construction, shared by both modes. The caller fills in cs->server
+ * or cs->client on the returned socket; everything from the bind down is
+ * mode-independent. `what` only labels the startup log line. */
+static ctrl_socket_t *
+ctrl_socket_new(struct event_base *eb, const char *addr, int port, const char *what)
 {
-    if (!eb || port <= 0 || port > 65535 || !server) return NULL;
+    if (!eb || port <= 0 || port > 65535) return NULL;
 
     if (!addr || addr[0] == '\0') addr = "127.0.0.1";
 
@@ -659,10 +799,6 @@ ctrl_socket_create(struct event_base *eb, const char *addr, int port,
     ctrl_socket_t *cs = calloc(1, sizeof(*cs));
     if (!cs) return NULL;
     cs->eb = eb;
-    cs->server = server;
-    /* Borrowed, not copied — the platform ctx outlives this socket. */
-    cs->gro_receives = gro_receives;
-    cs->gro_datagrams = gro_datagrams;
 
     /* Determine address family */
     struct sockaddr_in sin4;
@@ -727,7 +863,33 @@ ctrl_socket_create(struct event_base *eb, const char *addr, int port,
     }
     event_add(cs->ev_accept, NULL);
 
-    LOG_INF("control API listening on %s:%d", addr, port);
+    LOG_INF("control API (%s) listening on %s:%d", what, addr, port);
+    return cs;
+}
+
+ctrl_socket_t *
+ctrl_socket_create(struct event_base *eb, const char *addr, int port,
+                   mqvpn_server_t *server, const uint64_t *gro_receives,
+                   const uint64_t *gro_datagrams)
+{
+    if (!server) return NULL;
+    ctrl_socket_t *cs = ctrl_socket_new(eb, addr, port, "server");
+    if (!cs) return NULL;
+    cs->server = server;
+    /* Borrowed, not copied — the platform ctx outlives this socket. */
+    cs->gro_receives = gro_receives;
+    cs->gro_datagrams = gro_datagrams;
+    return cs;
+}
+
+ctrl_socket_t *
+ctrl_socket_create_client(struct event_base *eb, const char *addr, int port,
+                          mqvpn_client_t *client)
+{
+    if (!client) return NULL;
+    ctrl_socket_t *cs = ctrl_socket_new(eb, addr, port, "client");
+    if (!cs) return NULL;
+    cs->client = client;
     return cs;
 }
 

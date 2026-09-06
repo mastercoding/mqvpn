@@ -31,7 +31,13 @@ typedef struct {
     struct event *ev_tun;
     struct event *ev_sigint;
     struct event *ev_sigterm;
-    struct event *ev_status;  /* periodic status log timer */
+    struct event *ev_status; /* periodic status log timer */
+#if defined(__linux__)
+    /* JSON control API listener, client mode. NULL unless [Control] Listen /
+     * --control-port is set. Opaque here so non-Linux builds and translation
+     * units that never touch the control API do not pull control_socket.h. */
+    struct ctrl_socket_s *ctrl;
+#endif
     struct event *ev_recover; /* periodic dropped-path re-add timer (3s) */
 
     /* Path manager (UDP sockets) */
