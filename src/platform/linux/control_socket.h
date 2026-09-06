@@ -2,9 +2,17 @@
 // Copyright (c) 2026 mp0rta and mqvpn contributors
 
 /*
- * control_socket.h — TCP control API for mqvpn server
+ * control_socket.h — TCP control API for mqvpn
  *
  * Listens on a TCP port (default: 127.0.0.1 only) and accepts JSON commands.
+ *
+ * Two modes. A socket created with ctrl_socket_create() is bound to a server
+ * and serves the management + monitoring commands. A socket created with
+ * ctrl_socket_create_client() is bound to a client and serves exactly one
+ * command, get_client_status, which reports this client's own tunnel state
+ * and per-path detail. Server-only commands answer
+ * {"ok":false,"error":"server-only command"} on a client socket, and vice
+ * versa; the transport, framing, size caps and connection caps are shared.
  * All I/O is driven by the same libevent loop as the VPN — no locking needed.
  *
  * Protocol: one JSON object per connection (newline-terminated or EOF).
@@ -53,6 +61,20 @@ typedef struct ctrl_socket_s ctrl_socket_t;
 ctrl_socket_t *ctrl_socket_create(struct event_base *eb, const char *addr, int port,
                                   mqvpn_server_t *server, const uint64_t *gro_receives,
                                   const uint64_t *gro_datagrams);
+
+/* Client-mode listener. Same addr defaulting and same non-loopback warning.
+ *
+ * Serves only get_client_status, which is assembled entirely from the public
+ * client accessors (mqvpn_client_get_state / _get_stats / _get_paths), so this
+ * adds no library surface and no ABI change. The richer per-path fields the
+ * server reports (min_rtt, cwnd, pkt_lost, reinject_tx_bytes) live in
+ * mqvpn_path_stats_t, which the client does not expose; they are absent here
+ * rather than zero-filled.
+ *
+ * There is no gro_receives/gro_datagrams pair: those counters exist to feed
+ * get_stats's udp_rx_* fields, which are a server-side command. */
+ctrl_socket_t *ctrl_socket_create_client(struct event_base *eb, const char *addr,
+                                         int port, mqvpn_client_t *client);
 
 void ctrl_socket_destroy(ctrl_socket_t *cs);
 
