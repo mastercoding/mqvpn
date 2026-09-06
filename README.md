@@ -497,6 +497,37 @@ echo '{"cmd":"get_stats"}' | nc 127.0.0.1 9090
 {"ok":true,"n_clients":2,"bytes_tx":983040,"bytes_rx":458752}
 ```
 
+#### Get client status (client mode)
+
+The same `--control-port` / `[Control] Listen` knob works in client mode, where
+it serves a single command reporting the local client's own state and per-path
+detail. This exists for router and appliance integrations, which need live
+per-path state on the box itself — the `[STATUS]` log line is emitted only
+every 30 seconds, and only while the tunnel is established.
+
+```bash
+sudo mqvpn --mode client --server vpn.example.com:443 \
+    --path eth0 --path wwan0 --control-port 9091
+
+echo '{"cmd":"get_client_status"}' | nc 127.0.0.1 9091
+```
+```json
+{"ok":true,"mode":"client","state":"established",
+ "bytes_tx":12345678,"bytes_rx":9876543,"srtt_ms":31,
+ "dgram_sent":89012,"dgram_recv":84551,"dgram_lost":421,"dgram_acked":88341,
+ "tcp_flows_active":0,"n_paths":2,
+ "paths":[{"name":"eth0","status":"active","srtt_ms":28,"bytes_tx":6000,"bytes_rx":30000},
+          {"name":"wwan0","status":"active","srtt_ms":44,"bytes_tx":6345,"bytes_rx":37890}]}
+```
+
+Narrower than the server's `get_status`: the client does not expose
+`mqvpn_path_stats_t`, so per-path `min_rtt`, `cwnd`, `pkt_lost` and
+`reinject_tx_bytes` are absent rather than zero-filled. See
+[docs/control-api.md](docs/control-api.md) §5.9.
+
+Keep it on loopback. The control API has no authentication and no TLS in
+either mode.
+
 #### Error response
 
 ```json

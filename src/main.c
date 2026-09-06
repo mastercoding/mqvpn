@@ -64,11 +64,11 @@ usage(const char *prog)
         "  --kill-switch             Block traffic outside the VPN tunnel (client mode)\n"
         "  --no-manage-routes        Do not modify the host routing table "
         "(router/embedded integration)\n"
-        "  --control-port PORT       TCP port for JSON control API (server mode)\n"
+        "  --control-port PORT       TCP port for JSON control API (client and server)\n"
         "  --control-addr ADDR       Bind address for control API (default 127.0.0.1)\n"
         "                            (also configurable via [Control] Listen in INI / "
         "control_listen in JSON)\n"
-        "  --status                  Query server status via control API and exit\n"
+        "  --status                  Query status via control API and exit\n"
         "                            (uses --control-port, or [Control] Listen from "
         "--config)\n"
         "  --cc bbr2|bbr|cubic|none  Congestion control algorithm (default bbr2)\n"
@@ -564,6 +564,10 @@ main(int argc, char *argv[])
             /* INI [Hybrid]; always valid (mqvpn_config_defaults seeds the
              * disabled defaults even with no [Hybrid] section). */
             .hybrid = file_cfg.hybrid,
+            /* [Control] Listen / --control-port. Loopback-only JSON control
+             * API; 0 disables it. Same knob as server mode. */
+            .control_addr = eff_control_addr,
+            .control_port = eff_control_port,
             /* [Advanced]; 0 = off. Client-only (server path never reads it). */
             .recv_rate_limit = file_cfg.recv_rate_limit,
             /* [Advanced] UdpGso; default 1. Applies to client and server. */

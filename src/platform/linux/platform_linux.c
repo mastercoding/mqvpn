@@ -716,6 +716,19 @@ linux_platform_run_client(const mqvpn_client_cfg_t *cfg)
     /* Tick timer */
     ctx.ev_tick = event_new(ctx.eb, -1, 0, on_tick_timer, &ctx);
 
+    /* JSON control API ([Control] Listen / --control-port). Non-fatal: a box
+     * whose control port is already taken should still bring the tunnel up,
+     * it just loses local status queries. Runs on this same event loop, so
+     * handlers observe library state without locking — same contract as the
+     * server-side listener. */
+    if (cfg->control_port > 0) {
+        ctx.ctrl = ctrl_socket_create_client(ctx.eb, cfg->control_addr,
+                                             cfg->control_port, ctx.client);
+        if (!ctx.ctrl)
+            LOG_WRN("control API: failed to start on port %d (continuing without it)",
+                    cfg->control_port);
+    }
+
     /* Connect */
     if (mqvpn_client_connect(ctx.client) != MQVPN_OK) {
         LOG_ERR("client connect failed");
@@ -752,6 +765,14 @@ cleanup:
      * NULL guards below skip whatever the callbacks already released. Path
      * fds must also outlive the destroy (the flush sends on them), so
      * path_mgr_destroy stays below as well. */
+    /* Control socket first: it borrows ctx.client and its handlers run on the
+     * same loop the destroy-time flush drives, so it must stop accepting
+     * before the client goes away. */
+    if (ctx.ctrl) {
+        ctrl_socket_destroy(ctx.ctrl);
+        ctx.ctrl = NULL;
+    }
+
     mqvpn_client_destroy(ctx.client);
     ctx.client = NULL;
 
