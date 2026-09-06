@@ -41,9 +41,11 @@ typedef struct mqvpn_client_cfg_s {
     mqvpn_reorder_config_t
         reorder;                  /* INI [Reorder]/[ReorderRule] (mode OFF by default) */
     mqvpn_hybrid_config_t hybrid; /* INI [Hybrid] (disabled by default) */
-    uint64_t recv_rate_limit;     /* [Advanced] RecvRateLimit, bytes/sec; 0 = off */
-    int udp_gso;                  /* [Advanced] UdpGso; default 1 */
-    int udp_gro;                  /* [Advanced] UdpGro; default 1 */
+    const char *control_addr; /* bind address for JSON control API (default 127.0.0.1) */
+    int control_port;         /* TCP port for JSON control API (0 = disabled) */
+    uint64_t recv_rate_limit; /* [Advanced] RecvRateLimit, bytes/sec; 0 = off */
+    int udp_gso;              /* [Advanced] UdpGso; default 1 */
+    int udp_gro;              /* [Advanced] UdpGro; default 1 */
 } mqvpn_client_cfg_t;
 
 /* CLI → library config bridge (src/platform/client_config_bridge.c): forwards

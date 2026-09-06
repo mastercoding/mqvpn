@@ -50,6 +50,14 @@ static int g_all_fec_n = 0;
 
 static int g_reorder_rc = 0;
 
+/* Client-mode stub state. */
+static mqvpn_client_state_t g_client_state = MQVPN_STATE_ESTABLISHED;
+static int g_client_stats_rc = MQVPN_OK;
+static mqvpn_stats_t g_client_stats;
+static int g_client_paths_rc = MQVPN_OK;
+static int g_client_n_paths = 0;
+static mqvpn_path_info_t g_client_paths[MQVPN_MAX_PATHS];
+
 /* ── Stubs for the server-facing API the handlers call ────────────────────── */
 
 int
@@ -195,6 +203,50 @@ mqvpn_reorder_latency_buffered_percentile(const mqvpn_reorder_stats_t *st, doubl
     (void)st;
     (void)q;
     return 2.5;
+}
+
+/* ── Stubs for the client-facing API get_client_status calls ──────────────── */
+
+mqvpn_client_state_t
+mqvpn_client_get_state(const mqvpn_client_t *c)
+{
+    (void)c;
+    return g_client_state;
+}
+
+int
+mqvpn_client_get_stats(const mqvpn_client_t *c, mqvpn_stats_t *out)
+{
+    (void)c;
+    if (g_client_stats_rc != MQVPN_OK) return g_client_stats_rc;
+    *out = g_client_stats;
+    return MQVPN_OK;
+}
+
+int
+mqvpn_client_get_paths(const mqvpn_client_t *c, mqvpn_path_info_t *out, int max_paths,
+                       int *n_out)
+{
+    (void)c;
+    if (g_client_paths_rc != MQVPN_OK) return g_client_paths_rc;
+    int n = g_client_n_paths < max_paths ? g_client_n_paths : max_paths;
+    for (int i = 0; i < n; i++)
+        out[i] = g_client_paths[i];
+    *n_out = n;
+    return MQVPN_OK;
+}
+
+const char *
+mqvpn_path_status_string(mqvpn_path_status_t status)
+{
+    switch (status) {
+    case MQVPN_PATH_PENDING: return "pending";
+    case MQVPN_PATH_ACTIVE: return "active";
+    case MQVPN_PATH_DEGRADED: return "degraded";
+    case MQVPN_PATH_STANDBY: return "standby";
+    case MQVPN_PATH_CLOSED: return "closed";
+    default: return "unknown";
+    }
 }
 
 /* Pull in dispatch() + the command handlers (all static). */
