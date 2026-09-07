@@ -37,6 +37,16 @@ typedef struct {
      * --control-port is set. Opaque here so non-Linux builds and translation
      * units that never touch the control API do not pull control_socket.h. */
     struct ctrl_socket_s *ctrl;
+
+    /* Last close reason and pending reconnect delay, recorded by
+     * cb_tunnel_closed / cb_reconnect_scheduled and reported by
+     * get_client_status. Neither is derivable from the library's state
+     * accessors: mqvpn_client_get_state() says "reconnecting", not why, and
+     * the backoff delay is chosen by the library and only announced through
+     * the callback. Without these a consumer has to scrape the log to tell a
+     * rejected key from an unreachable server. */
+    char last_error[128];
+    int reconnect_in_sec;
 #endif
     struct event *ev_recover; /* periodic dropped-path re-add timer (3s) */
 

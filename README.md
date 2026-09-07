@@ -532,10 +532,14 @@ echo '{"cmd":"get_client_status"}' | nc 127.0.0.1 9091
 {"ok":true,"mode":"client","state":"established",
  "bytes_tx":12345678,"bytes_rx":9876543,"srtt_ms":31,
  "dgram_sent":89012,"dgram_recv":84551,"dgram_lost":421,"dgram_acked":88341,
- "tcp_flows_active":0,"n_paths":2,
+ "tcp_flows_active":0,"last_error":"","reconnect_in_sec":0,"n_paths":2,
  "paths":[{"name":"eth0","status":"active","srtt_ms":28,"bytes_tx":6000,"bytes_rx":30000},
           {"name":"wwan0","status":"active","srtt_ms":44,"bytes_tx":6345,"bytes_rx":37890}]}
 ```
+
+`last_error` and `reconnect_in_sec` answer the two questions `state` cannot:
+*why* the tunnel dropped, and when it will try again. Both come from the
+client's own lifecycle callbacks, which is the only place they exist.
 
 Narrower than the server's `get_status`: the client does not expose
 `mqvpn_path_stats_t`, so per-path `min_rtt`, `cwnd`, `pkt_lost` and
