@@ -49,7 +49,7 @@
  *   {"ok":true,"mode":"client","state":"established",
  *    "bytes_tx":X,"bytes_rx":Y,"srtt_ms":N,
  *    "dgram_sent":S,"dgram_recv":R,"dgram_lost":L,"dgram_acked":A,
- *    "tcp_flows_active":N,"n_paths":N,
+ *    "tcp_flows_active":N,"last_error":"","reconnect_in_sec":0,"n_paths":N,
  *    "paths":[{"name":"eth0","status":"active","srtt_ms":N,
  *              "bytes_tx":X,"bytes_rx":Y}, ...]}
  */
@@ -111,6 +111,10 @@ struct ctrl_socket_s {
      * The dispatch table's per-row client_ok flag is the single gate. */
     mqvpn_server_t *server;
     mqvpn_client_t *client;
+    /* Client mode: borrowed platform-owned diagnostics. See
+     * ctrl_socket_create_client. NULL = report "" / 0. */
+    const char *cli_last_error;
+    const int *cli_reconnect_in_sec;
     /* Borrowed platform-owned RX offload counters; see ctrl_socket_create's
      * doc for why these do not travel through mqvpn_stats_t. NULL = report 0. */
     const uint64_t *gro_receives;
@@ -518,6 +522,19 @@ ctrl_sanitize_ifname(const char *in, size_t in_len, char *out, size_t out_len)
     out[j] = '\0';
 }
 
+/* Same idea for free text: keep printable ASCII, drop everything a JSON string
+ * would need escaping for. Used for the close reason. */
+static void
+ctrl_sanitize_text(const char *in, size_t in_len, char *out, size_t out_len)
+{
+    size_t j = 0;
+    for (size_t i = 0; i < in_len && in[i] != '\0' && j + 1 < out_len; i++) {
+        unsigned char c = (unsigned char)in[i];
+        out[j++] = (c >= 0x20 && c < 0x7f && c != '"' && c != '\\') ? (char)c : ' ';
+    }
+    out[j] = '\0';
+}
+
 static int
 ctrl_cmd_get_client_status(const char *req, char *resp, size_t resp_len,
                            ctrl_socket_t *cs)
@@ -556,14 +573,26 @@ ctrl_cmd_get_client_status(const char *req, char *resp, size_t resp_len,
         pos += w;                                                      \
     } while (0)
 
+    /* mqvpn_error_string() returns a fixed set of literals, none containing a
+     * quote or backslash, so this needs no escaping — but it is filtered
+     * anyway, on the same principle as the interface names below: nothing
+     * validates it for JSON safety on our behalf. */
+    char last_err[128] = {0};
+    if (cs->cli_last_error)
+        ctrl_sanitize_text(cs->cli_last_error, sizeof(last_err) - 1, last_err,
+                           sizeof(last_err));
+
     APPEND("{\"ok\":true,\"mode\":\"client\",\"state\":\"%s\","
            "\"bytes_tx\":%" PRIu64 ",\"bytes_rx\":%" PRIu64 ",\"srtt_ms\":%d,"
            "\"dgram_sent\":%" PRIu64 ",\"dgram_recv\":%" PRIu64 ","
            "\"dgram_lost\":%" PRIu64 ",\"dgram_acked\":%" PRIu64 ","
-           "\"tcp_flows_active\":%" PRIu64 ",\"n_paths\":%d,\"paths\":[",
+           "\"tcp_flows_active\":%" PRIu64 ","
+           "\"last_error\":\"%s\",\"reconnect_in_sec\":%d,"
+           "\"n_paths\":%d,\"paths\":[",
            ctrl_client_state_label(mqvpn_client_get_state(client)), st.bytes_tx,
            st.bytes_rx, st.srtt_ms, st.dgram_sent, st.dgram_recv, st.dgram_lost,
-           st.dgram_acked, st.tcp_flows_active, n_paths);
+           st.dgram_acked, st.tcp_flows_active, last_err,
+           cs->cli_reconnect_in_sec ? *cs->cli_reconnect_in_sec : 0, n_paths);
 
     for (int i = 0; i < n_paths; i++) {
         char name[sizeof(paths[i].name) + 1];
@@ -884,12 +913,16 @@ ctrl_socket_create(struct event_base *eb, const char *addr, int port,
 
 ctrl_socket_t *
 ctrl_socket_create_client(struct event_base *eb, const char *addr, int port,
-                          mqvpn_client_t *client)
+                          mqvpn_client_t *client, const char *last_error,
+                          const int *reconnect_in_sec)
 {
     if (!client) return NULL;
     ctrl_socket_t *cs = ctrl_socket_new(eb, addr, port, "client");
     if (!cs) return NULL;
     cs->client = client;
+    /* Borrowed, not copied — the platform ctx outlives this socket. */
+    cs->cli_last_error = last_error;
+    cs->cli_reconnect_in_sec = reconnect_in_sec;
     return cs;
 }
 

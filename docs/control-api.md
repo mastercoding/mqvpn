@@ -519,7 +519,9 @@ socket serves.
   "bytes_tx":12345678,"bytes_rx":9876543,"srtt_ms":31,
   "dgram_sent":89012,"dgram_recv":84551,
   "dgram_lost":421,"dgram_acked":88341,
-  "tcp_flows_active":1,"n_paths":2,
+  "tcp_flows_active":1,
+  "last_error":"","reconnect_in_sec":0,
+  "n_paths":2,
   "paths":[
     {"name":"eth0","status":"active","srtt_ms":28,"bytes_tx":6000,"bytes_rx":30000},
     {"name":"wwan0","status":"active","srtt_ms":44,"bytes_tx":6345,"bytes_rx":37890}
@@ -541,6 +543,8 @@ socket serves.
 | `dgram_lost`       | uint64 | QUIC datagrams declared lost                                                |
 | `dgram_acked`      | uint64 | QUIC datagrams acknowledged                                                 |
 | `tcp_flows_active` | uint64 | Hybrid mode: live TCP-lane flows. 0 when hybrid is off.                     |
+| `last_error`       | string | Why the tunnel last closed — `mqvpn_error_string()` of the reason passed to `mqvpn_tunnel_closed_fn`. Empty once the tunnel re-establishes. Not derivable from `state`, which reports *that* the client is reconnecting but not why: a rejected pre-shared key and an unreachable server look identical without this. Emitted through a printable-ASCII filter, like `paths[].name`. |
+| `reconnect_in_sec` | int    | Seconds until the next reconnect attempt, from `mqvpn_reconnect_scheduled_fn`. `0` when none is pending. The library chooses this backoff internally and announces it only through that callback, so it is otherwise unobservable. |
 | `n_paths`          | int    | Number of entries in `paths`                                                |
 | `paths`            | array  | Per-path objects (see below)                                                |
 
@@ -554,6 +558,14 @@ socket serves.
 | `bytes_tx` | uint64 | Bytes sent on this path                                                     |
 | `bytes_rx` | uint64 | Bytes received on this path                                                 |
 
+> **`last_error` and `reconnect_in_sec` come from the platform, not the
+> library.** Both are recorded by the client's own `tunnel_closed` and
+> `reconnect_scheduled` callbacks and passed to `ctrl_socket_create_client` as
+> borrowed pointers — the same pattern the server side uses for its UDP GRO
+> counters, and for the same reason: the value never crosses the library ABI,
+> so routing it through `mqvpn_stats_t` would add a field nothing in the
+> library produces.
+>
 > **Narrower than `get_status` by design.** The server's path objects carry
 > `min_rtt_ms`, `cwnd`, `in_flight`, `pkt_sent`, `pkt_recv`, `pkt_lost` and
 > `reinject_tx_bytes`, all sourced from `mqvpn_path_stats_t`. The client does
