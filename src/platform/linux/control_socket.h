@@ -72,9 +72,19 @@ ctrl_socket_t *ctrl_socket_create(struct event_base *eb, const char *addr, int p
  * rather than zero-filled.
  *
  * There is no gro_receives/gro_datagrams pair: those counters exist to feed
- * get_stats's udp_rx_* fields, which are a server-side command. */
+ * get_stats's udp_rx_* fields, which are a server-side command.
+ *
+ * last_error and reconnect_in_sec are borrowed, not copied, exactly like the
+ * server's gro counters: the platform ctx outlives this socket, and the
+ * platform's callbacks are the only writers, running on the same libevent
+ * loop as this socket's handlers. Both may be NULL (reported as "" and 0).
+ * They carry what the library's accessors cannot: mqvpn_client_get_state()
+ * reports "reconnecting" but not why, and the backoff delay is announced only
+ * through mqvpn_reconnect_scheduled_fn. */
 ctrl_socket_t *ctrl_socket_create_client(struct event_base *eb, const char *addr,
-                                         int port, mqvpn_client_t *client);
+                                         int port, mqvpn_client_t *client,
+                                         const char *last_error,
+                                         const int *reconnect_in_sec);
 
 void ctrl_socket_destroy(ctrl_socket_t *cs);
 
