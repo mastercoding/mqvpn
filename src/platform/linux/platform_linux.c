@@ -201,8 +201,10 @@ fail:
 static void
 cb_tunnel_closed(mqvpn_error_t reason, void *user_ctx)
 {
-    (void)user_ctx;
-    LOG_INF("tunnel closed: %s", mqvpn_error_string(reason));
+    platform_ctx_t *p = (platform_ctx_t *)user_ctx;
+    const char *why = mqvpn_error_string(reason);
+    if (p) snprintf(p->last_error, sizeof(p->last_error), "%s", why);
+    LOG_INF("tunnel closed: %s", why);
 }
 
 static void
@@ -223,6 +225,13 @@ cb_state_changed(mqvpn_client_state_t old_state, mqvpn_client_state_t new_state,
     const char *os = (old_state < 7) ? names[old_state] : "?";
     const char *ns = (new_state < 7) ? names[new_state] : "?";
     LOG_INF("state: %s → %s", os, ns);
+
+    /* A successful connect retires the previous failure: leaving it set would
+     * make get_client_status report a stale reason against a healthy tunnel. */
+    if (new_state == MQVPN_STATE_ESTABLISHED) {
+        p->last_error[0] = '\0';
+        p->reconnect_in_sec = 0;
+    }
 
     /* On RECONNECTING or CLOSED, tear down TUN and platform resources so
      * that stale fd events don't fire ("tun read: Bad file descriptor").
@@ -290,7 +299,8 @@ cb_log(mqvpn_log_level_t level, const char *msg, void *user_ctx)
 static void
 cb_reconnect_scheduled(int delay_sec, void *user_ctx)
 {
-    (void)user_ctx;
+    platform_ctx_t *p = (platform_ctx_t *)user_ctx;
+    if (p) p->reconnect_in_sec = delay_sec;
     LOG_INF("reconnect scheduled in %d seconds", delay_sec);
 }
 
@@ -723,7 +733,8 @@ linux_platform_run_client(const mqvpn_client_cfg_t *cfg)
      * server-side listener. */
     if (cfg->control_port > 0) {
         ctx.ctrl = ctrl_socket_create_client(ctx.eb, cfg->control_addr,
-                                             cfg->control_port, ctx.client);
+                                             cfg->control_port, ctx.client,
+                                             ctx.last_error, &ctx.reconnect_in_sec);
         if (!ctx.ctrl)
             LOG_WRN("control API: failed to start on port %d (continuing without it)",
                     cfg->control_port);
