@@ -111,8 +111,9 @@ typedef struct mqvpn_file_config_s {
     int udp_gro;
 
     /* [Advanced] — receive-buffering limits (H3BodyBufPerStream,
-     * H3BodyBufPerConn, BlockedBufPerStream, BlockedBufPerConn,
-     * MaxRecvWindow). All zero = leave xquic's own defaults alone. Unlike
+     * BlockedBufPerStream, BlockedBufPerConn, MaxRecvWindow). All zero =
+     * leave xquic's own defaults alone — which for the two BlockedBuf keys
+     * means 1 MB / 8 MB on a server and unbounded on a client. Unlike
      * recv_rate_limit these apply to both client and server; see
      * src/buf_limits.h for why, and for the ordering rule between
      * MaxRecvWindow and the body-buf bound. */

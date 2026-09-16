@@ -1709,22 +1709,22 @@ test_advanced_buf_limits(void)
     mqvpn_file_config_t cfg;
 
     /* Default: every one zero. That is the whole "lands inert" claim — xquic
-     * reads 0 as "use my own default" for all five, so a config that names
-     * none of them is byte-for-byte the previous release. */
+     * reads 0 as "use my own default" for all four, so a config that names
+     * none of them is byte-for-byte the previous release. Note that for the
+     * two BlockedBuf keys xquic's own default is 1 MB / 8 MB on a SERVER and
+     * unbounded on a client; see src/buf_limits.h. */
     mqvpn_config_defaults(&cfg);
     ASSERT_EQ_ULL(cfg.bufs.h3_body_buf_per_stream, 0ULL,
                   "h3_body_buf_per_stream default 0");
-    ASSERT_EQ_ULL(cfg.bufs.h3_body_buf_per_conn, 0ULL, "h3_body_buf_per_conn default 0");
     ASSERT_EQ_ULL(cfg.bufs.blocked_buf_per_stream, 0ULL,
                   "blocked_buf_per_stream default 0");
     ASSERT_EQ_ULL(cfg.bufs.blocked_buf_per_conn, 0ULL, "blocked_buf_per_conn default 0");
     ASSERT_EQ_ULL(cfg.bufs.max_recv_window, 0ULL, "max_recv_window default 0");
 
-    /* INI. Five distinct values so a row wired to the wrong struct member
+    /* INI. Four distinct values so a row wired to the wrong struct member
      * cannot pass. */
     char *p = write_tmp("[Advanced]\n"
                         "H3BodyBufPerStream = 262144\n"
-                        "H3BodyBufPerConn = 4194304\n"
                         "BlockedBufPerStream = 1048576\n"
                         "BlockedBufPerConn = 8388608\n"
                         "MaxRecvWindow = 6291456\n");
@@ -1732,17 +1732,15 @@ test_advanced_buf_limits(void)
     ASSERT_EQ_INT(mqvpn_config_load(&cfg, p), 0, "buf limits ini load ok");
     unlink(p);
     ASSERT_EQ_ULL(cfg.bufs.h3_body_buf_per_stream, 262144ULL, "ini H3BodyBufPerStream");
-    ASSERT_EQ_ULL(cfg.bufs.h3_body_buf_per_conn, 4194304ULL, "ini H3BodyBufPerConn");
     ASSERT_EQ_ULL(cfg.bufs.blocked_buf_per_stream, 1048576ULL, "ini BlockedBufPerStream");
     ASSERT_EQ_ULL(cfg.bufs.blocked_buf_per_conn, 8388608ULL, "ini BlockedBufPerConn");
     ASSERT_EQ_ULL(cfg.bufs.max_recv_window, 6291456ULL, "ini MaxRecvWindow");
 
-    /* JSON: same five keys, snake_case, inside the bounded "advanced" object
+    /* JSON: same four keys, snake_case, inside the bounded "advanced" object
      * — NOT a nested "bufs" object. The C struct groups them so the two
      * bridges stay one call; the config surface must not show that. */
     p = write_tmp("{\"advanced\": {"
                   "\"h3_body_buf_per_stream\": 262144,"
-                  "\"h3_body_buf_per_conn\": 4194304,"
                   "\"blocked_buf_per_stream\": 1048576,"
                   "\"blocked_buf_per_conn\": 8388608,"
                   "\"max_recv_window\": 6291456"
@@ -1752,7 +1750,6 @@ test_advanced_buf_limits(void)
     unlink(p);
     ASSERT_EQ_ULL(cfg.bufs.h3_body_buf_per_stream, 262144ULL,
                   "json h3_body_buf_per_stream");
-    ASSERT_EQ_ULL(cfg.bufs.h3_body_buf_per_conn, 4194304ULL, "json h3_body_buf_per_conn");
     ASSERT_EQ_ULL(cfg.bufs.blocked_buf_per_stream, 1048576ULL,
                   "json blocked_buf_per_stream");
     ASSERT_EQ_ULL(cfg.bufs.blocked_buf_per_conn, 8388608ULL, "json blocked_buf_per_conn");
@@ -2030,7 +2027,6 @@ test_ini_json_scalar_parity(void)
                       "UdpGso = false\n"
                       "UdpGro = false\n"
                       "H3BodyBufPerStream = 262144\n"
-                      "H3BodyBufPerConn = 4194304\n"
                       "BlockedBufPerStream = 1048576\n"
                       "BlockedBufPerConn = 8388608\n"
                       "MaxRecvWindow = 6291456\n";
@@ -2092,7 +2088,6 @@ test_ini_json_scalar_parity(void)
                        "\"udp_gso\":false,"
                        "\"udp_gro\":false,"
                        "\"h3_body_buf_per_stream\":262144,"
-                       "\"h3_body_buf_per_conn\":4194304,"
                        "\"blocked_buf_per_stream\":1048576,"
                        "\"blocked_buf_per_conn\":8388608,"
                        "\"max_recv_window\":6291456"
@@ -2157,8 +2152,6 @@ test_ini_json_scalar_parity(void)
     ASSERT_EQ_INT(a.udp_gro, b.udp_gro, "parity advanced udp_gro");
     ASSERT_EQ_ULL(a.bufs.h3_body_buf_per_stream, b.bufs.h3_body_buf_per_stream,
                   "parity advanced h3_body_buf_per_stream");
-    ASSERT_EQ_ULL(a.bufs.h3_body_buf_per_conn, b.bufs.h3_body_buf_per_conn,
-                  "parity advanced h3_body_buf_per_conn");
     ASSERT_EQ_ULL(a.bufs.blocked_buf_per_stream, b.bufs.blocked_buf_per_stream,
                   "parity advanced blocked_buf_per_stream");
     ASSERT_EQ_ULL(a.bufs.blocked_buf_per_conn, b.bufs.blocked_buf_per_conn,
@@ -2197,8 +2190,6 @@ test_ini_json_scalar_parity(void)
     ASSERT_EQ_INT(a.udp_gro, 0, "parity advanced udp_gro is non-default");
     ASSERT_EQ_ULL(a.bufs.h3_body_buf_per_stream, 262144ULL,
                   "parity h3_body_buf_per_stream is non-default");
-    ASSERT_EQ_ULL(a.bufs.h3_body_buf_per_conn, 4194304ULL,
-                  "parity h3_body_buf_per_conn is non-default");
     ASSERT_EQ_ULL(a.bufs.blocked_buf_per_stream, 1048576ULL,
                   "parity blocked_buf_per_stream is non-default");
     ASSERT_EQ_ULL(a.bufs.blocked_buf_per_conn, 8388608ULL,

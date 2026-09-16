@@ -645,8 +645,6 @@ static const cfg_key_desc_t cfg_keys[] = {
      * server, unlike RecvRateLimit above. */
     CFG_U64(SEC_ADVANCED, "H3BodyBufPerStream", "h3_body_buf_per_stream",
             bufs.h3_body_buf_per_stream, MQVPN_BUF_LIMIT_MAX),
-    CFG_U64(SEC_ADVANCED, "H3BodyBufPerConn", "h3_body_buf_per_conn",
-            bufs.h3_body_buf_per_conn, MQVPN_BUF_LIMIT_MAX),
     CFG_U64(SEC_ADVANCED, "BlockedBufPerStream", "blocked_buf_per_stream",
             bufs.blocked_buf_per_stream, MQVPN_BUF_LIMIT_MAX),
     CFG_U64(SEC_ADVANCED, "BlockedBufPerConn", "blocked_buf_per_conn",
