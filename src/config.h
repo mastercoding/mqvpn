@@ -17,6 +17,7 @@
 #include "libmqvpn.h"          /* for MQVPN_MAX_PATHS, MQVPN_MAX_USERS */
 #include "reorder.h"           /* for embedded mqvpn_reorder_config_t (§16.1 INI) */
 #include "hybrid/classifier.h" /* for embedded mqvpn_hybrid_config_t ([Hybrid]) */
+#include "buf_limits.h"        /* for embedded mqvpn_buf_limits_t ([Advanced]) */
 
 #define MQVPN_CONFIG_MAX_PATHS 8
 #define MQVPN_CONFIG_MAX_DNS   4
@@ -108,6 +109,14 @@ typedef struct mqvpn_file_config_s {
      * client and server. Platform-side only: unlike udp_gso it never crosses
      * the library ABI. */
     int udp_gro;
+
+    /* [Advanced] — receive-buffering limits (H3BodyBufPerStream,
+     * H3BodyBufPerConn, BlockedBufPerStream, BlockedBufPerConn,
+     * MaxRecvWindow). All zero = leave xquic's own defaults alone. Unlike
+     * recv_rate_limit these apply to both client and server; see
+     * src/buf_limits.h for why, and for the ordering rule between
+     * MaxRecvWindow and the body-buf bound. */
+    mqvpn_buf_limits_t bufs;
 
     /* Inferred mode: 1=server, 0=client */
     int is_server;

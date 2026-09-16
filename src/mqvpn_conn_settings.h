@@ -52,6 +52,17 @@ typedef struct {
      * registration on — never a re-derived condition, which is what would let
      * them drift apart. */
     bool defer_send_flush;
+    /* [Advanced] receive-buffering limits (src/buf_limits.h). All-zero =
+     * xquic's own defaults, i.e. no behaviour change, which is what lets
+     * these land before any value has been measured.
+     *
+     * NOT parameterised per side and NOT hard-zeroed for servers, unlike
+     * recv_rate_bytes_per_sec above: an upload makes the server the receiver
+     * holding the identical per-request buffers, so a bound that only ever
+     * binds on a client leaves that direction exactly as it was. The builder
+     * assigns them outside the is_server if/else for that reason, and
+     * tests/test_conn_settings.c pins both sides. */
+    mqvpn_buf_limits_t bufs;
 } mqvpn_conn_settings_input_t;
 
 /* Populates *out with mqvpn-canonical xquic conn settings. Always begins

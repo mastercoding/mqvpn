@@ -13,6 +13,7 @@
 #include "mqvpn_scheduler.h"
 #include "mqvpn_sched_names.h"
 
+#include <stdint.h>
 #include <string.h>
 
 #include <xquic/xquic.h>
@@ -20,6 +21,19 @@
 /* Send-queue cap. Same value the previous inline blocks used; kept here
  * so adding new mqvpn-wide xquic-tuning knobs lives next to the builder. */
 #define XQC_SNDQ_MAX_PKTS 16384
+
+/* xquic's own xqc_min() lives in src/common/xqc_config.h, which is NOT part
+ * of the installed public header set mqvpn compiles against. */
+static inline uint64_t
+mqvpn_clamp_u64(uint64_t v, uint64_t hi)
+{
+    return v > hi ? hi : v;
+}
+
+_Static_assert(MQVPN_BUF_LIMIT_MAX <= (uint64_t)SIZE_MAX,
+               "the size_t cast below must not truncate the clamped value");
+_Static_assert(MQVPN_MAX_RECV_WINDOW_MAX <= (uint64_t)UINT32_MAX,
+               "the uint32_t cast below must not truncate the clamped value");
 
 void
 mqvpn_apply_scheduler(xqc_conn_settings_t *cs, mqvpn_scheduler_t sched)
@@ -199,6 +213,34 @@ mqvpn_build_conn_settings(const mqvpn_conn_settings_input_t *in, xqc_conn_settin
     if (in->init_max_path_id > 0) {
         out->init_max_path_id = in->init_max_path_id;
     }
+
+    /* --- [Advanced] receive-buffering limits ---
+     *
+     * DELIBERATELY OUTSIDE the is_server if/else above. recv_rate_bytes_per_sec
+     * is in it because a conn-level RATE cap on a server throttles every
+     * client's uplink; these five are per-stream/per-connection BUFFER bounds
+     * and the concentrator is the receiver for uploads, holding the same
+     * buffers the box holds on a download (both sides reach
+     * xqc_h3_request_recv_body). Moving them into the else branch would leave
+     * the upload direction unbounded and no client-side test would notice.
+     *
+     * Zero is carried through as zero on purpose: xquic reads 0 as "use my
+     * default" for all five, so an unset key is the pre-existing behaviour
+     * exactly. The clamps are for a direct API caller that bypassed the
+     * config surface's range check — xquic types the four buffer limits
+     * size_t (32-bit on mips/arm OpenWrt targets) and max_recv_window
+     * uint32_t, so an unclamped assignment could TRUNCATE a large request
+     * down to a small bound, which is the failure direction that matters. */
+    out->max_body_buf_per_stream =
+        (size_t)mqvpn_clamp_u64(in->bufs.h3_body_buf_per_stream, MQVPN_BUF_LIMIT_MAX);
+    out->max_body_buf_per_conn =
+        (size_t)mqvpn_clamp_u64(in->bufs.h3_body_buf_per_conn, MQVPN_BUF_LIMIT_MAX);
+    out->max_blocked_buf_per_stream =
+        (size_t)mqvpn_clamp_u64(in->bufs.blocked_buf_per_stream, MQVPN_BUF_LIMIT_MAX);
+    out->max_blocked_buf_per_conn =
+        (size_t)mqvpn_clamp_u64(in->bufs.blocked_buf_per_conn, MQVPN_BUF_LIMIT_MAX);
+    out->max_recv_window =
+        (uint32_t)mqvpn_clamp_u64(in->bufs.max_recv_window, MQVPN_MAX_RECV_WINDOW_MAX);
 }
 
 #if defined(__linux__)
