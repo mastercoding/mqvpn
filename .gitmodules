@@ -1,7 +1,7 @@
 [submodule "third_party/xquic"]
 	path = third_party/xquic
-	url = https://github.com/mp0rta/xquic.git
-	branch = mqvpn-main
+	url = https://github.com/mastercoding/xquic.git
+	branch = lane-fix
 [submodule "third_party/lwip"]
 	path = third_party/lwip
 	url = https://github.com/mp0rta/heiher-lwip.git
