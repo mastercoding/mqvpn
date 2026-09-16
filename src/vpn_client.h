@@ -9,6 +9,7 @@
 #include "libmqvpn.h"          /* for MQVPN_MAX_PATHS */
 #include "reorder.h"           /* mqvpn_reorder_config_t (INI [Reorder] bridge) */
 #include "hybrid/classifier.h" /* mqvpn_hybrid_config_t (INI [Hybrid] bridge) */
+#include "buf_limits.h"        /* mqvpn_buf_limits_t (INI [Advanced] bridge) */
 
 #define MQVPN_MAX_PATH_IFACES 8
 _Static_assert(MQVPN_MAX_PATH_IFACES == MQVPN_MAX_PATHS,
@@ -46,6 +47,10 @@ typedef struct mqvpn_client_cfg_s {
     uint64_t recv_rate_limit; /* [Advanced] RecvRateLimit, bytes/sec; 0 = off */
     int udp_gso;              /* [Advanced] UdpGso; default 1 */
     int udp_gro;              /* [Advanced] UdpGro; default 1 */
+    /* [Advanced] receive-buffering limits; all 0 = xquic defaults untouched.
+     * Bridged, unlike UdpGso: these are library settings, and the server
+     * carries the identical struct (vpn_server.h). */
+    mqvpn_buf_limits_t bufs;
 } mqvpn_client_cfg_t;
 
 /* CLI → library config bridge (src/platform/client_config_bridge.c): forwards

@@ -607,6 +607,13 @@ if(BUILD_TESTING)
     # unconditionally alongside the profile check rather than behind the lane.
     add_test(NAME check_bssl_build_guard
              COMMAND bash ${CMAKE_SOURCE_DIR}/tests/check_bssl_build_guard.sh)
+    # Source gate, same class: the [Advanced] buffer limits have two CLI->
+    # library bridges and the server one lives inside a run loop that no unit
+    # test can call, so a dropped call there would be silent. Registered
+    # unconditionally for the same reason as the guard above.
+    add_test(NAME check_buf_limits_bridged
+             COMMAND bash ${CMAKE_SOURCE_DIR}/tests/check_buf_limits_bridged.sh
+                     ${CMAKE_SOURCE_DIR}/src)
     add_executable(test_route_parse_darwin
         tests/test_route_parse_darwin.c src/platform/darwin/routing.c
         src/platform/posix/dns_common.c src/log.c)
@@ -786,6 +793,13 @@ if(BUILD_TESTING)
     # unconditionally alongside the profile check rather than behind the lane.
     add_test(NAME check_bssl_build_guard
              COMMAND bash ${CMAKE_SOURCE_DIR}/tests/check_bssl_build_guard.sh)
+    # Source gate, same class: the [Advanced] buffer limits have two CLI->
+    # library bridges and the server one lives inside a run loop that no unit
+    # test can call, so a dropped call there would be silent. Registered
+    # unconditionally for the same reason as the guard above.
+    add_test(NAME check_buf_limits_bridged
+             COMMAND bash ${CMAKE_SOURCE_DIR}/tests/check_buf_limits_bridged.sh
+                     ${CMAKE_SOURCE_DIR}/src)
 
     # Each test links only the source files it needs (no xquic dependency)
     add_executable(test_config  tests/test_config.c  src/config.c  src/log.c)

@@ -1702,6 +1702,119 @@ test_advanced_recv_rate_limit(void)
     ASSERT_EQ_INT(cfg.recv_rate_limit == 0, 1, "over-max json rejected → default 0");
 }
 
+
+static void
+test_advanced_buf_limits(void)
+{
+    mqvpn_file_config_t cfg;
+
+    /* Default: every one zero. That is the whole "lands inert" claim — xquic
+     * reads 0 as "use my own default" for all five, so a config that names
+     * none of them is byte-for-byte the previous release. */
+    mqvpn_config_defaults(&cfg);
+    ASSERT_EQ_ULL(cfg.bufs.h3_body_buf_per_stream, 0ULL,
+                  "h3_body_buf_per_stream default 0");
+    ASSERT_EQ_ULL(cfg.bufs.h3_body_buf_per_conn, 0ULL, "h3_body_buf_per_conn default 0");
+    ASSERT_EQ_ULL(cfg.bufs.blocked_buf_per_stream, 0ULL,
+                  "blocked_buf_per_stream default 0");
+    ASSERT_EQ_ULL(cfg.bufs.blocked_buf_per_conn, 0ULL, "blocked_buf_per_conn default 0");
+    ASSERT_EQ_ULL(cfg.bufs.max_recv_window, 0ULL, "max_recv_window default 0");
+
+    /* INI. Five distinct values so a row wired to the wrong struct member
+     * cannot pass. */
+    char *p = write_tmp("[Advanced]\n"
+                        "H3BodyBufPerStream = 262144\n"
+                        "H3BodyBufPerConn = 4194304\n"
+                        "BlockedBufPerStream = 1048576\n"
+                        "BlockedBufPerConn = 8388608\n"
+                        "MaxRecvWindow = 6291456\n");
+    mqvpn_config_defaults(&cfg);
+    ASSERT_EQ_INT(mqvpn_config_load(&cfg, p), 0, "buf limits ini load ok");
+    unlink(p);
+    ASSERT_EQ_ULL(cfg.bufs.h3_body_buf_per_stream, 262144ULL, "ini H3BodyBufPerStream");
+    ASSERT_EQ_ULL(cfg.bufs.h3_body_buf_per_conn, 4194304ULL, "ini H3BodyBufPerConn");
+    ASSERT_EQ_ULL(cfg.bufs.blocked_buf_per_stream, 1048576ULL, "ini BlockedBufPerStream");
+    ASSERT_EQ_ULL(cfg.bufs.blocked_buf_per_conn, 8388608ULL, "ini BlockedBufPerConn");
+    ASSERT_EQ_ULL(cfg.bufs.max_recv_window, 6291456ULL, "ini MaxRecvWindow");
+
+    /* JSON: same five keys, snake_case, inside the bounded "advanced" object
+     * — NOT a nested "bufs" object. The C struct groups them so the two
+     * bridges stay one call; the config surface must not show that. */
+    p = write_tmp("{\"advanced\": {"
+                  "\"h3_body_buf_per_stream\": 262144,"
+                  "\"h3_body_buf_per_conn\": 4194304,"
+                  "\"blocked_buf_per_stream\": 1048576,"
+                  "\"blocked_buf_per_conn\": 8388608,"
+                  "\"max_recv_window\": 6291456"
+                  "}}");
+    mqvpn_config_defaults(&cfg);
+    ASSERT_EQ_INT(mqvpn_config_load(&cfg, p), 0, "buf limits json load ok");
+    unlink(p);
+    ASSERT_EQ_ULL(cfg.bufs.h3_body_buf_per_stream, 262144ULL,
+                  "json h3_body_buf_per_stream");
+    ASSERT_EQ_ULL(cfg.bufs.h3_body_buf_per_conn, 4194304ULL, "json h3_body_buf_per_conn");
+    ASSERT_EQ_ULL(cfg.bufs.blocked_buf_per_stream, 1048576ULL,
+                  "json blocked_buf_per_stream");
+    ASSERT_EQ_ULL(cfg.bufs.blocked_buf_per_conn, 8388608ULL, "json blocked_buf_per_conn");
+    ASSERT_EQ_ULL(cfg.bufs.max_recv_window, 6291456ULL, "json max_recv_window");
+
+    /* Range: the maxima are TYPE limits, not policy. xquic types the four
+     * buffer fields size_t (32-bit on the mips/arm OpenWrt targets) and
+     * max_recv_window uint32_t, so a value past them could only arrive
+     * truncated — 2^32 would land as 0, i.e. "unbounded", which is the
+     * opposite of what an operator typing a huge number wants. Rejected at
+     * the surface (warn-and-continue, field keeps its default), boundary
+     * accepted. */
+    char over[256];
+    snprintf(over, sizeof(over), "[Advanced]\nH3BodyBufPerStream = %llu\n",
+             (unsigned long long)MQVPN_BUF_LIMIT_MAX + 1);
+    p = write_tmp(over);
+    mqvpn_config_defaults(&cfg);
+    ASSERT_EQ_INT(mqvpn_config_load(&cfg, p), 0, "over-max ini warns, load rc 0");
+    unlink(p);
+    ASSERT_EQ_ULL(cfg.bufs.h3_body_buf_per_stream, 0ULL,
+                  "over-max H3BodyBufPerStream rejected → default 0");
+
+    snprintf(over, sizeof(over), "[Advanced]\nH3BodyBufPerStream = %llu\n",
+             (unsigned long long)MQVPN_BUF_LIMIT_MAX);
+    p = write_tmp(over);
+    mqvpn_config_defaults(&cfg);
+    ASSERT_EQ_INT(mqvpn_config_load(&cfg, p), 0, "boundary ini load ok");
+    unlink(p);
+    ASSERT_EQ_ULL(cfg.bufs.h3_body_buf_per_stream, MQVPN_BUF_LIMIT_MAX,
+                  "boundary H3BodyBufPerStream accepted");
+
+    snprintf(over, sizeof(over), "{\"advanced\": {\"max_recv_window\": %llu}}",
+             (unsigned long long)MQVPN_MAX_RECV_WINDOW_MAX + 1);
+    p = write_tmp(over);
+    mqvpn_config_defaults(&cfg);
+    ASSERT_EQ_INT(mqvpn_config_load(&cfg, p), 0, "over-max json warns, load rc 0");
+    unlink(p);
+    ASSERT_EQ_ULL(cfg.bufs.max_recv_window, 0ULL,
+                  "over-max max_recv_window rejected → default 0");
+
+    snprintf(over, sizeof(over), "{\"advanced\": {\"max_recv_window\": %llu}}",
+             (unsigned long long)MQVPN_MAX_RECV_WINDOW_MAX);
+    p = write_tmp(over);
+    mqvpn_config_defaults(&cfg);
+    ASSERT_EQ_INT(mqvpn_config_load(&cfg, p), 0, "boundary json load ok");
+    unlink(p);
+    ASSERT_EQ_ULL(cfg.bufs.max_recv_window, MQVPN_MAX_RECV_WINDOW_MAX,
+                  "boundary max_recv_window accepted");
+
+    /* Section binding: cfg_key_apply_ini() requires d->section == section, so
+     * an [Advanced] key written under another header is discarded with a
+     * warning and NOT a load failure. Pinned here because the renderer that
+     * will emit these keys does not have an [Advanced] block yet — this is
+     * the failure it would produce, and it is silent. */
+    p = write_tmp("[Hybrid]\nH3BodyBufPerStream = 262144\n");
+    mqvpn_config_defaults(&cfg);
+    ASSERT_EQ_INT(mqvpn_config_load(&cfg, p), 0, "wrong-section ini warns, load rc 0");
+    unlink(p);
+    ASSERT_EQ_ULL(cfg.bufs.h3_body_buf_per_stream, 0ULL,
+                  "H3BodyBufPerStream under [Hybrid] is silently discarded");
+}
+
 static void
 test_advanced_udp_gso(void)
 {
@@ -1915,7 +2028,12 @@ test_ini_json_scalar_parity(void)
                       "[Advanced]\n"
                       "RecvRateLimit = 77\n"
                       "UdpGso = false\n"
-                      "UdpGro = false\n";
+                      "UdpGro = false\n"
+                      "H3BodyBufPerStream = 262144\n"
+                      "H3BodyBufPerConn = 4194304\n"
+                      "BlockedBufPerStream = 1048576\n"
+                      "BlockedBufPerConn = 8388608\n"
+                      "MaxRecvWindow = 6291456\n";
     /* NOTE: [Auth] Key is INI-only dual-write (auth_key + server_auth_key);
      * mirror it in JSON by setting BOTH json keys to the same value. */
     const char *ini_auth_extra = "[Auth]\nKey = parity-secret\n";
@@ -1972,7 +2090,12 @@ test_ini_json_scalar_parity(void)
                        "\"advanced\":{"
                        "\"recv_rate_limit\":77,"
                        "\"udp_gso\":false,"
-                       "\"udp_gro\":false"
+                       "\"udp_gro\":false,"
+                       "\"h3_body_buf_per_stream\":262144,"
+                       "\"h3_body_buf_per_conn\":4194304,"
+                       "\"blocked_buf_per_stream\":1048576,"
+                       "\"blocked_buf_per_conn\":8388608,"
+                       "\"max_recv_window\":6291456"
                        "}"
                        "}";
 
@@ -2032,6 +2155,16 @@ test_ini_json_scalar_parity(void)
                   "parity advanced recv_rate_limit");
     ASSERT_EQ_INT(a.udp_gso, b.udp_gso, "parity advanced udp_gso");
     ASSERT_EQ_INT(a.udp_gro, b.udp_gro, "parity advanced udp_gro");
+    ASSERT_EQ_ULL(a.bufs.h3_body_buf_per_stream, b.bufs.h3_body_buf_per_stream,
+                  "parity advanced h3_body_buf_per_stream");
+    ASSERT_EQ_ULL(a.bufs.h3_body_buf_per_conn, b.bufs.h3_body_buf_per_conn,
+                  "parity advanced h3_body_buf_per_conn");
+    ASSERT_EQ_ULL(a.bufs.blocked_buf_per_stream, b.bufs.blocked_buf_per_stream,
+                  "parity advanced blocked_buf_per_stream");
+    ASSERT_EQ_ULL(a.bufs.blocked_buf_per_conn, b.bufs.blocked_buf_per_conn,
+                  "parity advanced blocked_buf_per_conn");
+    ASSERT_EQ_ULL(a.bufs.max_recv_window, b.bufs.max_recv_window,
+                  "parity advanced max_recv_window");
 
     /* Non-default guards: prove these asserts pass because the value was
      * actually parsed, not because it silently failed to parse on BOTH
@@ -2062,6 +2195,16 @@ test_ini_json_scalar_parity(void)
                   "parity advanced recv_rate_limit is non-default");
     ASSERT_EQ_INT(a.udp_gso, 0, "parity advanced udp_gso is non-default");
     ASSERT_EQ_INT(a.udp_gro, 0, "parity advanced udp_gro is non-default");
+    ASSERT_EQ_ULL(a.bufs.h3_body_buf_per_stream, 262144ULL,
+                  "parity h3_body_buf_per_stream is non-default");
+    ASSERT_EQ_ULL(a.bufs.h3_body_buf_per_conn, 4194304ULL,
+                  "parity h3_body_buf_per_conn is non-default");
+    ASSERT_EQ_ULL(a.bufs.blocked_buf_per_stream, 1048576ULL,
+                  "parity blocked_buf_per_stream is non-default");
+    ASSERT_EQ_ULL(a.bufs.blocked_buf_per_conn, 8388608ULL,
+                  "parity blocked_buf_per_conn is non-default");
+    ASSERT_EQ_ULL(a.bufs.max_recv_window, 6291456ULL,
+                  "parity max_recv_window is non-default");
 
     /* Both structs were memset by mqvpn_config_defaults → padding is zero
      * → whole-struct compare is deterministic. */
@@ -2307,6 +2450,7 @@ main(void)
     test_hybrid_defaults_when_absent();
     test_hybrid_section_parse();
     test_advanced_recv_rate_limit();
+    test_advanced_buf_limits();
     test_advanced_udp_gso();
     test_advanced_udp_gro();
     test_hybrid_egress_acl_ini();

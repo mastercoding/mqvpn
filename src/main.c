@@ -574,6 +574,9 @@ main(int argc, char *argv[])
             .udp_gso = file_cfg.udp_gso,
             /* [Advanced] UdpGro; default 1. Applies to client and server. */
             .udp_gro = file_cfg.udp_gro,
+            /* [Advanced] receive-buffering limits; all 0 = xquic defaults.
+             * Same struct on the server branch below — both sides. */
+            .bufs = file_cfg.bufs,
         };
         for (int i = 0; i < n_paths; i++) {
             cfg.path_ifaces[i] = path_ifaces[i];
@@ -635,6 +638,9 @@ main(int argc, char *argv[])
             .udp_gso = file_cfg.udp_gso,
             /* [Advanced] UdpGro; default 1. Applies to client and server. */
             .udp_gro = file_cfg.udp_gro,
+            /* [Advanced] receive-buffering limits; all 0 = xquic defaults.
+             * Same struct on the client branch above — both sides. */
+            .bufs = file_cfg.bufs,
         };
         for (int i = 0; i < eff_n_users; i++) {
             cfg.user_names[i] = eff_user_names[i];

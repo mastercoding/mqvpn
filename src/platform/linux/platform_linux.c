@@ -1240,6 +1240,11 @@ linux_platform_run_server(const mqvpn_server_cfg_t *cfg)
     mqvpn_config_apply_reorder(lib_cfg,
                                &cfg->reorder); /* INI [Reorder]/[ReorderRule] bridge */
     mqvpn_config_apply_hybrid(lib_cfg, &cfg->hybrid); /* INI [Hybrid] bridge */
+    /* INI [Advanced] buffer-limit bridge — the same call the client bridge
+     * makes (src/platform/client_config_bridge.c). These five are NOT
+     * client-only the way RecvRateLimit is: on an upload this process is the
+     * receiver holding the same per-request buffers. */
+    mqvpn_config_apply_buf_limits(lib_cfg, &cfg->bufs);
     /* Unconditional: 0 is a meaningful explicit-disable, not "unset". */
     mqvpn_config_set_udp_gso(lib_cfg, cfg->udp_gso);
 

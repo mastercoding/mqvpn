@@ -2758,6 +2758,9 @@ cli_start_connection(mqvpn_client_t *c)
         /* set by init_xquic_engine, which runs in mqvpn_client_new() before
          * any cli_start_connection() — connect and reconnect alike */
         .defer_send_flush = (c->tx_batch != 0),
+        /* [Advanced] buffer limits; all 0 = xquic defaults. Passed on the
+         * server side too (mqvpn_server.c) — see mqvpn_conn_settings.h. */
+        .bufs = c->config.bufs,
     };
     mqvpn_build_conn_settings(&cs_input, &cs);
 
