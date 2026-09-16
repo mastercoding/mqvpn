@@ -4,8 +4,10 @@
 /*
  * buf_limits.h — the [Advanced] receive-buffering limits.
  *
- * Five knobs that bound how much a receiver may hold for ONE peer before it
- * stops reading and lets QUIC flow control do the work (RFC 9000 §4.1).
+ * Four knobs that bound how much a receiver may hold for ONE peer. Two of
+ * them stop it reading and let QUIC flow control do the work (RFC 9000 §4.1);
+ * TWO OF THEM CLOSE THE TUNNEL INSTEAD — read blocked_buf_per_stream below
+ * before setting anything.
  * They are grouped in a struct, rather than spelled out five times, because
  * they are needed on BOTH sides and the CLI→library bridge is therefore two
  * call sites (src/platform/client_config_bridge.c and
@@ -48,14 +50,31 @@
 #define MQVPN_MAX_RECV_WINDOW_MAX 0xffffffffULL
 
 typedef struct mqvpn_buf_limits_s {
-    /* xqc_conn_settings_t.max_body_buf_per_stream / _per_conn: buffered
-     * HTTP/3 DATA payload a request (resp. a whole connection) may hold
-     * before the H3 layer stops reading the transport stream. 0 = unbounded,
-     * which is what every release before the field existed did.
+    /* xqc_conn_settings_t.max_body_buf_per_stream: buffered HTTP/3 DATA
+     * payload ONE request may hold before the H3 layer stops reading its
+     * transport stream. 0 = unbounded, which is what every release before the
+     * field existed did. This one is real backpressure: the read point
+     * freezes, the window stops advancing, the peer is told to wait, and the
+     * request resumes when the application drains. Nothing is dropped and no
+     * connection is closed.
      *
-     * READ THE ORDERING NOTE ON max_recv_window BELOW BEFORE SETTING THESE. */
+     * PER STREAM AND ONLY PER STREAM. There is no companion connection-wide
+     * key, and that is deliberate rather than missing: a request can only be
+     * suspended on bytes its own application can free. An earlier revision of
+     * xquic carried a max_body_buf_per_conn, and it could suspend a request
+     * holding ZERO bytes because of bytes a different request held — with
+     * nothing of its own to drain, that request never resumed and its
+     * delivered bytes were never read, for the life of the connection, with
+     * the tunnel reporting healthy. So the aggregate across concurrent
+     * requests is NOT bounded here: it is
+     * (backlogged requests x h3_body_buf_per_stream), and the lever for it is
+     * max_recv_window below, which dominates the sum anyway — a suspended
+     * request holds at most this many parsed bytes against up to a full
+     * receive window of un-reassembled ones (measured 262,144 against
+     * 16,655,150 on the same stream at the same instant).
+     *
+     * READ THE ORDERING NOTE ON max_recv_window BELOW BEFORE SETTING THIS. */
     uint64_t h3_body_buf_per_stream;
-    uint64_t h3_body_buf_per_conn;
 
     /* xqc_conn_settings_t.max_blocked_buf_per_stream / _per_conn: the QPACK
      * decode-blocked buffer, which is a SECOND queue on the same request and
@@ -69,13 +88,31 @@ typedef struct mqvpn_buf_limits_s {
      * in mqvpn_client.c / mqvpn_server.c), so that path is reachable, not
      * theoretical.
      *
-     * ASYMMETRIC DEFAULT, and this is the trap: xquic applies its internal
-     * 1 MB / 8 MB defaults for these two ONLY inside
+     * ================== THESE TWO ARE NOT BACKPRESSURE ==================
+     * EXCEEDING EITHER LIMIT CLOSES THE HTTP/3 CONNECTION — the tunnel —
+     * with H3_EXCESSIVE_LOAD. Not a pause, not a drop, not a reset of the
+     * offending stream: the whole tunnel goes down and every TCP flow on it
+     * dies with it. Two sites do it, both unconditional:
+     * xqc_h3_stream_process_in() and xqc_h3_stream_process_blocked_data(),
+     * via XQC_H3_CONN_ERR(h3c, H3_EXCESSIVE_LOAD, ...). The value you choose
+     * is the amount of decode-blocked data that is allowed to arrive before
+     * the customer's tunnel is torn down, and at the ~25 MB/s this lane has
+     * been measured at, 1 MiB is about 42 ms of blocked time on one request.
+     * ====================================================================
+     *
+     * ASYMMETRIC DEFAULT, and this is the second trap: xquic applies its
+     * internal 1 MB / 8 MB defaults for these two ONLY inside
      * xqc_server_set_conn_settings(); the client path assigns the whole
      * settings struct with no defaulting. So 0 means 1 MB / 8 MB on the
-     * CONCENTRATOR and UNBOUNDED on the BOX. Whoever sets
-     * h3_body_buf_per_stream must set blocked_buf_per_stream in the same
-     * breath or the box's bound is a bound on one of two queues. */
+     * CONCENTRATOR — where the fatal branch has therefore been armed since
+     * before these keys existed — and UNBOUNDED on the BOX.
+     *
+     * The consequence is that there is no safe value, only a choice of
+     * failure: a number, and a legitimate peer behind a deep queue can take
+     * the tunnel down; or 0 on the box, and one decode-blocked request can
+     * grow without bound the way body_buf used to. Choose it deliberately and
+     * say which you chose. Measured position for this lane is in
+     * website/guide/configuration.md under BlockedBufPerStream. */
     uint64_t blocked_buf_per_stream;
     uint64_t blocked_buf_per_conn;
 

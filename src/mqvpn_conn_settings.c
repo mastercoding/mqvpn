@@ -233,8 +233,6 @@ mqvpn_build_conn_settings(const mqvpn_conn_settings_input_t *in, xqc_conn_settin
      * down to a small bound, which is the failure direction that matters. */
     out->max_body_buf_per_stream =
         (size_t)mqvpn_clamp_u64(in->bufs.h3_body_buf_per_stream, MQVPN_BUF_LIMIT_MAX);
-    out->max_body_buf_per_conn =
-        (size_t)mqvpn_clamp_u64(in->bufs.h3_body_buf_per_conn, MQVPN_BUF_LIMIT_MAX);
     out->max_blocked_buf_per_stream =
         (size_t)mqvpn_clamp_u64(in->bufs.blocked_buf_per_stream, MQVPN_BUF_LIMIT_MAX);
     out->max_blocked_buf_per_conn =

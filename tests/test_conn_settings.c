@@ -246,7 +246,6 @@ test_recv_rate_limit_wiring(void)
  * satisfy asserts written against a single shared value. */
 static const mqvpn_buf_limits_t k_lim = {
     .h3_body_buf_per_stream = 262144,  /* 256 KiB */
-    .h3_body_buf_per_conn = 4194304,   /* 4 MiB   */
     .blocked_buf_per_stream = 1048576, /* 1 MiB   */
     .blocked_buf_per_conn = 8388608,   /* 8 MiB   */
     .max_recv_window = 6291456,        /* 6 MiB   */
@@ -256,7 +255,6 @@ static int
 check_lim_applied(const xqc_conn_settings_t *cs)
 {
     ASSERT_EQ(cs->max_body_buf_per_stream, 262144);
-    ASSERT_EQ(cs->max_body_buf_per_conn, 4194304);
     ASSERT_EQ(cs->max_blocked_buf_per_stream, 1048576);
     ASSERT_EQ(cs->max_blocked_buf_per_conn, 8388608);
     ASSERT_EQ(cs->max_recv_window, 6291456);
@@ -291,11 +289,10 @@ test_buf_limits_reach_both_sides(void)
     /* The asymmetry, asserted side by side in one place so the difference is
      * a property of the test suite and not of two tests that drifted: the
      * SAME input struct, the SAME builder call, one field dropped on the
-     * server and five carried. */
+     * server and four carried. */
     ASSERT_EQ(cli.recv_rate_bytes_per_sec, 125000000ULL);
     ASSERT_EQ(srv.recv_rate_bytes_per_sec, 0);
     ASSERT_EQ(srv.max_body_buf_per_stream, cli.max_body_buf_per_stream);
-    ASSERT_EQ(srv.max_body_buf_per_conn, cli.max_body_buf_per_conn);
     ASSERT_EQ(srv.max_blocked_buf_per_stream, cli.max_blocked_buf_per_stream);
     ASSERT_EQ(srv.max_blocked_buf_per_conn, cli.max_blocked_buf_per_conn);
     ASSERT_EQ(srv.max_recv_window, cli.max_recv_window);
@@ -304,9 +301,14 @@ test_buf_limits_reach_both_sides(void)
 
 /* Zero in, zero out, on both sides. This is the claim the whole round rests
  * on: the keys land with no behaviour change until a measured value is set,
- * because xquic reads 0 as "use my own default" for all five. A builder that
- * helpfully invented an internal default here would make step 5's "render
- * nothing, change nothing" impossible and would ship an unmeasured bound. */
+ * because xquic reads 0 as "use my own default" for all four. NOTE that
+ * xquic's own default for the two blocked-buf fields is not "unbounded": it
+ * substitutes 1 MB / 8 MB inside xqc_server_set_conn_settings() and nothing
+ * at all on the client path, so zero here means two different things on the
+ * two sides. That is xquic's asymmetry, documented in src/buf_limits.h; what
+ * this test pins is that the BUILDER does not invent one of its own, which
+ * would make "render nothing, change nothing" impossible and would ship an
+ * unmeasured bound. */
 static int
 test_buf_limits_zero_is_inert(void)
 {
@@ -318,7 +320,6 @@ test_buf_limits_zero_is_inert(void)
     };
     mqvpn_build_conn_settings(&in, &cs);
     ASSERT_EQ(cs.max_body_buf_per_stream, 0);
-    ASSERT_EQ(cs.max_body_buf_per_conn, 0);
     ASSERT_EQ(cs.max_blocked_buf_per_stream, 0);
     ASSERT_EQ(cs.max_blocked_buf_per_conn, 0);
     ASSERT_EQ(cs.max_recv_window, 0);
@@ -326,7 +327,6 @@ test_buf_limits_zero_is_inert(void)
     in.is_server = true;
     mqvpn_build_conn_settings(&in, &cs);
     ASSERT_EQ(cs.max_body_buf_per_stream, 0);
-    ASSERT_EQ(cs.max_body_buf_per_conn, 0);
     ASSERT_EQ(cs.max_blocked_buf_per_stream, 0);
     ASSERT_EQ(cs.max_blocked_buf_per_conn, 0);
     ASSERT_EQ(cs.max_recv_window, 0);
@@ -353,7 +353,6 @@ test_buf_limits_clamped_never_truncated(void)
         .bufs =
             {
                 .h3_body_buf_per_stream = 0x100000000ULL, /* wraps to 0 if truncated */
-                .h3_body_buf_per_conn = 0x100000100ULL,   /* wraps to 256 if truncated */
                 .blocked_buf_per_stream = 0xffffffffffffffffULL,
                 .blocked_buf_per_conn = MQVPN_BUF_LIMIT_MAX, /* boundary: unchanged */
                 .max_recv_window = 0x100000000ULL,
@@ -361,7 +360,6 @@ test_buf_limits_clamped_never_truncated(void)
     };
     mqvpn_build_conn_settings(&in, &cs);
     ASSERT_EQ(cs.max_body_buf_per_stream, MQVPN_BUF_LIMIT_MAX);
-    ASSERT_EQ(cs.max_body_buf_per_conn, MQVPN_BUF_LIMIT_MAX);
     ASSERT_EQ(cs.max_blocked_buf_per_stream, MQVPN_BUF_LIMIT_MAX);
     ASSERT_EQ(cs.max_blocked_buf_per_conn, MQVPN_BUF_LIMIT_MAX);
     ASSERT_EQ(cs.max_recv_window, MQVPN_MAX_RECV_WINDOW_MAX);

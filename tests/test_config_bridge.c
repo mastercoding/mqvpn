@@ -80,7 +80,6 @@ test_all_fields_forwarded(void)
      * five distinct values so a bridge that copied one member into another
      * cannot pass. */
     cfg.bufs.h3_body_buf_per_stream = 262144;
-    cfg.bufs.h3_body_buf_per_conn = 4194304;
     cfg.bufs.blocked_buf_per_stream = 1048576;
     cfg.bufs.blocked_buf_per_conn = 8388608;
     cfg.bufs.max_recv_window = 6291456;
@@ -121,8 +120,6 @@ test_all_fields_forwarded(void)
     ASSERT_EQ_INT(lc->udp_gso, 1, "udp_gso NOT bridged");
     ASSERT_EQ_INT(lc->bufs.h3_body_buf_per_stream, 262144,
                   "bufs.h3_body_buf_per_stream bridged");
-    ASSERT_EQ_INT(lc->bufs.h3_body_buf_per_conn, 4194304,
-                  "bufs.h3_body_buf_per_conn bridged");
     ASSERT_EQ_INT(lc->bufs.blocked_buf_per_stream, 1048576,
                   "bufs.blocked_buf_per_stream bridged");
     ASSERT_EQ_INT(lc->bufs.blocked_buf_per_conn, 8388608,
@@ -168,7 +165,6 @@ test_defaults_and_fallbacks(void)
      * 0 already means "xquic's own default" for all five, and inventing one
      * here would make the keys live before any value has been measured. */
     ASSERT_EQ_INT(lc->bufs.h3_body_buf_per_stream, 0, "bufs zero stays zero (stream)");
-    ASSERT_EQ_INT(lc->bufs.h3_body_buf_per_conn, 0, "bufs zero stays zero (conn)");
     ASSERT_EQ_INT(lc->bufs.blocked_buf_per_stream, 0, "bufs zero stays zero (blocked)");
     ASSERT_EQ_INT(lc->bufs.blocked_buf_per_conn, 0,
                   "bufs zero stays zero (blocked conn)");
