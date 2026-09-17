@@ -370,6 +370,29 @@ main(int argc, char *argv[])
     }
 #endif
 
+    /* An [Advanced] buffer limit this build's xquic has no field for is
+     * refused here rather than ignored. These keys exist to bound memory;
+     * accepting one and running unbounded anyway would look configured and
+     * behave exactly like the unconfigured build. Zero is always fine — it
+     * means "leave xquic's own default alone" and needs no field.
+     *
+     * Below --status on purpose: querying a running instance does not open a
+     * connection, so a config this build cannot honour must not be what stops
+     * an operator from reading the state of one that is already up. Every
+     * path that actually starts a tunnel goes through here.
+     * See mqvpn_config_unsupported_buf_limit() in src/config.h. */
+    {
+        const char *unsupported = mqvpn_config_unsupported_buf_limit(&file_cfg);
+        if (unsupported != NULL) {
+            fprintf(stderr,
+                    "error: [Advanced] %s is set, but this build's xquic has no "
+                    "setting for it — rebuild against an xquic that does, or "
+                    "remove the key (0 means 'leave xquic's default alone')\n",
+                    unsupported);
+            return 1;
+        }
+    }
+
     /* CLI overrides config file values */
     const char *eff_tun_name = tun_name ? tun_name : file_cfg.tun_name;
     const char *eff_log_level = log_level_str ? log_level_str : file_cfg.log_level;
@@ -570,6 +593,13 @@ main(int argc, char *argv[])
             .udp_gso = file_cfg.udp_gso,
             /* [Advanced] UdpGro; default 1. Applies to client and server. */
             .udp_gro = file_cfg.udp_gro,
+            /* [Advanced] receive-buffering limits; all 0 = xquic's own
+             * defaults. The same four on the server branch below — both
+             * sides. */
+            .h3_body_buf_per_stream = file_cfg.h3_body_buf_per_stream,
+            .blocked_buf_per_stream = file_cfg.blocked_buf_per_stream,
+            .blocked_buf_per_conn = file_cfg.blocked_buf_per_conn,
+            .max_recv_window = file_cfg.max_recv_window,
         };
         for (int i = 0; i < n_paths; i++) {
             cfg.path_ifaces[i] = path_ifaces[i];
@@ -631,6 +661,13 @@ main(int argc, char *argv[])
             .udp_gso = file_cfg.udp_gso,
             /* [Advanced] UdpGro; default 1. Applies to client and server. */
             .udp_gro = file_cfg.udp_gro,
+            /* [Advanced] receive-buffering limits; all 0 = xquic's own
+             * defaults. The same four on the client branch above — both
+             * sides. */
+            .h3_body_buf_per_stream = file_cfg.h3_body_buf_per_stream,
+            .blocked_buf_per_stream = file_cfg.blocked_buf_per_stream,
+            .blocked_buf_per_conn = file_cfg.blocked_buf_per_conn,
+            .max_recv_window = file_cfg.max_recv_window,
         };
         for (int i = 0; i < eff_n_users; i++) {
             cfg.user_names[i] = eff_user_names[i];

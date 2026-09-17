@@ -13,6 +13,7 @@
 #include "mqvpn_scheduler.h"
 #include "mqvpn_sched_names.h"
 
+#include <stdint.h>
 #include <string.h>
 
 #include <xquic/xquic.h>
@@ -20,6 +21,14 @@
 /* Send-queue cap. Same value the previous inline blocks used; kept here
  * so adding new mqvpn-wide xquic-tuning knobs lives next to the builder. */
 #define XQC_SNDQ_MAX_PKTS 16384
+
+/* xquic's own xqc_min() lives in src/common/xqc_config.h, which is NOT part
+ * of the installed public header set mqvpn compiles against. */
+static inline uint64_t
+mqvpn_clamp_u64(uint64_t v, uint64_t hi)
+{
+    return v > hi ? hi : v;
+}
 
 void
 mqvpn_apply_scheduler(xqc_conn_settings_t *cs, mqvpn_scheduler_t sched)
@@ -199,6 +208,45 @@ mqvpn_build_conn_settings(const mqvpn_conn_settings_input_t *in, xqc_conn_settin
     if (in->init_max_path_id > 0) {
         out->init_max_path_id = in->init_max_path_id;
     }
+
+    /* --- [Advanced] receive-buffering limits ---
+     *
+     * DELIBERATELY OUTSIDE the is_server if/else above. recv_rate_bytes_per_sec
+     * is in it because a conn-level RATE cap on a server throttles every
+     * client's uplink; these four are per-stream/per-connection BUFFER bounds
+     * and the server is the receiver for uploads, holding the same buffers
+     * a client holds on a download (both sides reach
+     * xqc_h3_request_recv_body). Moving them into the else branch would leave
+     * the upload direction unbounded and no client-side test would notice.
+     *
+     * Zero is carried through as zero on purpose: xquic reads 0 as "use my
+     * default" for all four, so an unset key is the pre-existing behaviour
+     * exactly. The clamp is each field's own type — xquic keeps the three
+     * buffer bounds in a size_t (32-bit on mips/arm OpenWrt targets) and the
+     * window in a uint32_t — because a truncated assignment turns a large
+     * request into a SMALLER bound, or 0, which means none at all. The config
+     * surface caps every one of them at MQVPN_CONFIG_MAX_BUF_LIMIT for the
+     * same reason; this covers a caller that set the library config directly.
+     *
+     * The two #ifdefs are a submodule-pin question, not a platform one:
+     * xqc_conn_settings_t.max_body_buf_per_stream and .max_recv_window are not
+     * in the xquic this repository pins as of this commit, so CMake probes for
+     * each.
+     * Compiling an assignment out is only half the answer — the other half is
+     * mqvpn_config_unsupported_buf_limit() (src/config.h), which stops
+     * startup if the operator actually set the key. */
+#ifdef MQVPN_HAVE_XQC_MAX_BODY_BUF_PER_STREAM
+    out->max_body_buf_per_stream =
+        (size_t)mqvpn_clamp_u64(in->h3_body_buf_per_stream, (uint64_t)SIZE_MAX);
+#endif
+    out->max_blocked_buf_per_stream =
+        (size_t)mqvpn_clamp_u64(in->blocked_buf_per_stream, (uint64_t)SIZE_MAX);
+    out->max_blocked_buf_per_conn =
+        (size_t)mqvpn_clamp_u64(in->blocked_buf_per_conn, (uint64_t)SIZE_MAX);
+#ifdef MQVPN_HAVE_XQC_MAX_RECV_WINDOW
+    out->max_recv_window =
+        (uint32_t)mqvpn_clamp_u64(in->max_recv_window, (uint64_t)UINT32_MAX);
+#endif
 }
 
 #if defined(__linux__)

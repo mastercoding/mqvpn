@@ -44,6 +44,14 @@ typedef struct mqvpn_server_cfg_s {
     mqvpn_hybrid_config_t hybrid; /* INI [Hybrid] (disabled by default) */
     int udp_gso;                  /* [Advanced] UdpGso; default 1 */
     int udp_gro;                  /* [Advanced] UdpGro; default 1 */
+    /* [Advanced] receive-buffering limits, bytes; 0 = xquic's own default
+     * untouched (src/config.h documents each). Present on the server
+     * precisely because RecvRateLimit is not: for an upload the server is the
+     * receiver holding the same buffers. */
+    uint64_t h3_body_buf_per_stream;
+    uint64_t blocked_buf_per_stream;
+    uint64_t blocked_buf_per_conn;
+    uint64_t max_recv_window;
 } mqvpn_server_cfg_t;
 
 #endif /* MQVPN_VPN_SERVER_H */
