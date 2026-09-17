@@ -775,6 +775,13 @@ mqvpn_config_apply_hybrid(mqvpn_config_t *cfg, const mqvpn_hybrid_config_t *src)
     cfg->hybrid = *src;
 }
 
+void
+mqvpn_config_apply_buf_limits(mqvpn_config_t *cfg, const mqvpn_buf_limits_t *src)
+{
+    if (!cfg || !src) return;
+    cfg->bufs = *src;
+}
+
 int
 mqvpn_config_set_hybrid_connect_timeout(mqvpn_config_t *cfg, uint32_t sec)
 {

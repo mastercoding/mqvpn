@@ -45,6 +45,44 @@ endif()
 
 set(XQUIC_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/third_party/xquic/include)
 
+# ---------- [Advanced] buffer limits: which xquic fields this build has ----------
+# max_blocked_buf_per_stream/_per_conn have been in xqc_conn_settings_t for a
+# while; max_body_buf_per_stream and max_recv_window are newer and are absent
+# from older submodule pins. Detect them instead of assuming: assigning a
+# field that is not there is a build break, and accepting a config key that is
+# then never applied is worse than either. src/buf_limits.h turns the results
+# below into a startup error for a key that is set but cannot be honoured, so
+# neither failure can be silent.
+#
+# CMAKE_CONFIGURE_DEPENDS is what keeps this honest across a submodule bump:
+# build.sh reconfigures only when the cache is missing, so without it a cached
+# "absent" would survive the bump that added the field and the key would go
+# quietly dead. Unset first so the re-configure actually re-probes.
+include(CheckStructHasMember)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             ${XQUIC_INCLUDE_DIR}/xquic/xquic.h)
+unset(MQVPN_HAVE_XQC_MAX_BODY_BUF_PER_STREAM CACHE)
+unset(MQVPN_HAVE_XQC_MAX_RECV_WINDOW CACHE)
+set(CMAKE_REQUIRED_INCLUDES ${XQUIC_INCLUDE_DIR})
+check_struct_has_member("xqc_conn_settings_t" max_body_buf_per_stream
+                        "xquic/xquic.h" MQVPN_HAVE_XQC_MAX_BODY_BUF_PER_STREAM
+                        LANGUAGE C)
+check_struct_has_member("xqc_conn_settings_t" max_recv_window
+                        "xquic/xquic.h" MQVPN_HAVE_XQC_MAX_RECV_WINDOW LANGUAGE C)
+unset(CMAKE_REQUIRED_INCLUDES)
+if(MQVPN_HAVE_XQC_MAX_BODY_BUF_PER_STREAM)
+    add_compile_definitions(MQVPN_HAVE_XQC_MAX_BODY_BUF_PER_STREAM=1)
+else()
+    message(STATUS "xquic has no xqc_conn_settings_t.max_body_buf_per_stream — "
+                   "[Advanced] H3BodyBufPerStream will be refused at startup")
+endif()
+if(MQVPN_HAVE_XQC_MAX_RECV_WINDOW)
+    add_compile_definitions(MQVPN_HAVE_XQC_MAX_RECV_WINDOW=1)
+else()
+    message(STATUS "xquic has no xqc_conn_settings_t.max_recv_window — "
+                   "[Advanced] MaxRecvWindow will be refused at startup")
+endif()
+
 if(XQUIC_BUILD_DIR)
     message(STATUS "Using pre-built xquic from: ${XQUIC_BUILD_DIR}")
     add_library(xquic SHARED IMPORTED)
@@ -607,6 +645,13 @@ if(BUILD_TESTING)
     # unconditionally alongside the profile check rather than behind the lane.
     add_test(NAME check_bssl_build_guard
              COMMAND bash ${CMAKE_SOURCE_DIR}/tests/check_bssl_build_guard.sh)
+    # Source gate, same class: the [Advanced] buffer limits have two CLI->
+    # library bridges and the server one lives inside a run loop that no unit
+    # test can call, so a dropped call there would be silent. Registered
+    # unconditionally for the same reason as the guard above.
+    add_test(NAME check_buf_limits_bridged
+             COMMAND bash ${CMAKE_SOURCE_DIR}/tests/check_buf_limits_bridged.sh
+                     ${CMAKE_SOURCE_DIR}/src)
     add_executable(test_route_parse_darwin
         tests/test_route_parse_darwin.c src/platform/darwin/routing.c
         src/platform/posix/dns_common.c src/log.c)
@@ -786,6 +831,13 @@ if(BUILD_TESTING)
     # unconditionally alongside the profile check rather than behind the lane.
     add_test(NAME check_bssl_build_guard
              COMMAND bash ${CMAKE_SOURCE_DIR}/tests/check_bssl_build_guard.sh)
+    # Source gate, same class: the [Advanced] buffer limits have two CLI->
+    # library bridges and the server one lives inside a run loop that no unit
+    # test can call, so a dropped call there would be silent. Registered
+    # unconditionally for the same reason as the guard above.
+    add_test(NAME check_buf_limits_bridged
+             COMMAND bash ${CMAKE_SOURCE_DIR}/tests/check_buf_limits_bridged.sh
+                     ${CMAKE_SOURCE_DIR}/src)
 
     # Each test links only the source files it needs (no xquic dependency)
     add_executable(test_config  tests/test_config.c  src/config.c  src/log.c)

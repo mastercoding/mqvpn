@@ -338,6 +338,24 @@ main(int argc, char *argv[])
         }
     }
 
+    /* An [Advanced] buffer limit this build's xquic has no field for is
+     * refused here rather than ignored. These keys exist to bound memory;
+     * accepting one and running unbounded anyway would look configured and
+     * behave exactly like the unconfigured build. Zero is always fine — it
+     * means "leave xquic's own default alone" and needs no field.
+     * See src/buf_limits.h. */
+    {
+        const char *unsupported = mqvpn_buf_limits_unsupported(&file_cfg.bufs);
+        if (unsupported != NULL) {
+            fprintf(stderr,
+                    "error: [Advanced] %s is set, but this build's xquic has no "
+                    "setting for it — rebuild against an xquic that does, or "
+                    "remove the key (0 means 'leave xquic's default alone')\n",
+                    unsupported);
+            return 1;
+        }
+    }
+
     /* Resolve effective control endpoint (INI base + per-field CLI overrides).
      * Used by both --status (below) and the server-mode listener (further down). */
     char eff_control_addr_buf[256] = {0};
@@ -570,6 +588,9 @@ main(int argc, char *argv[])
             .udp_gso = file_cfg.udp_gso,
             /* [Advanced] UdpGro; default 1. Applies to client and server. */
             .udp_gro = file_cfg.udp_gro,
+            /* [Advanced] receive-buffering limits; all 0 = xquic defaults.
+             * Same struct on the server branch below — both sides. */
+            .bufs = file_cfg.bufs,
         };
         for (int i = 0; i < n_paths; i++) {
             cfg.path_ifaces[i] = path_ifaces[i];
@@ -631,6 +652,9 @@ main(int argc, char *argv[])
             .udp_gso = file_cfg.udp_gso,
             /* [Advanced] UdpGro; default 1. Applies to client and server. */
             .udp_gro = file_cfg.udp_gro,
+            /* [Advanced] receive-buffering limits; all 0 = xquic defaults.
+             * Same struct on the client branch above — both sides. */
+            .bufs = file_cfg.bufs,
         };
         for (int i = 0; i < eff_n_users; i++) {
             cfg.user_names[i] = eff_user_names[i];

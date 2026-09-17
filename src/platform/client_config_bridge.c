@@ -52,6 +52,12 @@ mqvpn_platform_apply_client_config(mqvpn_config_t *lib_cfg, const mqvpn_client_c
     mqvpn_config_apply_reorder(lib_cfg,
                                &cfg->reorder); /* INI [Reorder]/[ReorderRule] bridge */
     mqvpn_config_apply_hybrid(lib_cfg, &cfg->hybrid); /* INI [Hybrid] bridge */
+    /* INI [Advanced] buffer-limit bridge. Unconditional: every field is
+     * 0-means-"xquic default", so copying zeroes is a no-op and there is no
+     * "unset" to distinguish. The server run loop calls the SAME function
+     * (linux_platform_run_server) — that is what keeps these four from
+     * reaching only one side. */
+    mqvpn_config_apply_buf_limits(lib_cfg, &cfg->bufs);
     if (cfg->recv_rate_limit)
         mqvpn_config_set_recv_rate_limit(lib_cfg, cfg->recv_rate_limit);
 }

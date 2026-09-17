@@ -13,6 +13,7 @@
 #include "libmqvpn.h"
 #include "reorder.h"           /* mqvpn_reorder_config_t embedded in the builder config */
 #include "hybrid/classifier.h" /* mqvpn_hybrid_config_t embedded in the builder config */
+#include "buf_limits.h"        /* mqvpn_buf_limits_t embedded in the builder config */
 #include <stdbool.h>
 
 /* ─── Constants ─── */
@@ -146,6 +147,12 @@ struct mqvpn_config_s {
     uint64_t recv_rate_limit; /* 0 = off; client-only, see libmqvpn.h */
 
     int udp_gso; /* TX GSO/batch enable; default 1 */
+
+    /* [Advanced] receive-buffering limits (src/buf_limits.h). All zero =
+     * xquic defaults untouched. Both sides, unlike recv_rate_limit above:
+     * the concentrator is the receiver for uploads and holds the identical
+     * buffers. Consumed by mqvpn_build_conn_settings(). */
+    mqvpn_buf_limits_t bufs;
 };
 
 /* ─── State transition validation (M0-5) ─── */
@@ -166,6 +173,18 @@ void mqvpn_config_apply_reorder(mqvpn_config_t *cfg, const mqvpn_reorder_config_
  * mqvpn_file_config_t) into `cfg`. Shared by the platform layers so every
  * surface honors hybrid config identically. */
 void mqvpn_config_apply_hybrid(mqvpn_config_t *cfg, const mqvpn_hybrid_config_t *src);
+
+/* ─── Receive-buffering limits bridge ([Advanced]) ─── */
+
+/* Translate the parsed [Advanced] buffer limits into `cfg`. Shared by the
+ * client bridge (src/platform/client_config_bridge.c) AND the server run
+ * loop (linux_platform_run_server), which is the point: these four apply to
+ * both sides, so one function is what keeps a key added here from reaching
+ * only one of them. Values are passed through unvalidated — the config
+ * surface range-checks them against MQVPN_BUF_LIMIT_MAX /
+ * MQVPN_MAX_RECV_WINDOW_MAX at parse time, and 0 is always legal (it means
+ * "xquic default"). */
+void mqvpn_config_apply_buf_limits(mqvpn_config_t *cfg, const mqvpn_buf_limits_t *src);
 
 /* ─── Scheduler precondition predicate ─── */
 
