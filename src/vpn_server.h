@@ -14,6 +14,7 @@
 
 #include "reorder.h"           /* mqvpn_reorder_config_t (INI [Reorder] bridge) */
 #include "hybrid/classifier.h" /* mqvpn_hybrid_config_t (INI [Hybrid] bridge) */
+#include "buf_limits.h"        /* mqvpn_buf_limits_t (INI [Advanced] bridge) */
 
 typedef struct mqvpn_server_cfg_s {
     const char *listen_addr; /* bind address (e.g. "0.0.0.0") */
@@ -44,6 +45,10 @@ typedef struct mqvpn_server_cfg_s {
     mqvpn_hybrid_config_t hybrid; /* INI [Hybrid] (disabled by default) */
     int udp_gso;                  /* [Advanced] UdpGso; default 1 */
     int udp_gro;                  /* [Advanced] UdpGro; default 1 */
+    /* [Advanced] receive-buffering limits; all 0 = xquic defaults untouched.
+     * Present on the server precisely because RecvRateLimit is not: for an
+     * upload the server is the receiver holding the same buffers. */
+    mqvpn_buf_limits_t bufs;
 } mqvpn_server_cfg_t;
 
 #endif /* MQVPN_VPN_SERVER_H */

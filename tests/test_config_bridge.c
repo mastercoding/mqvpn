@@ -76,6 +76,13 @@ test_all_fields_forwarded(void)
     cfg.hybrid.tcp_max_flows = 77;
     cfg.recv_rate_limit = 123456;
     cfg.udp_gso = 0; /* platform-only knob: must NOT be bridged */
+    /* [Advanced] buffer limits: library settings, so they MUST be bridged —
+     * four distinct values so a bridge that copied one member into another
+     * cannot pass. */
+    cfg.bufs.h3_body_buf_per_stream = 262144;
+    cfg.bufs.blocked_buf_per_stream = 1048576;
+    cfg.bufs.blocked_buf_per_conn = 8388608;
+    cfg.bufs.max_recv_window = 6291456;
 
     mqvpn_config_t *lc = mqvpn_config_new();
     if (!lc) {
@@ -111,6 +118,13 @@ test_all_fields_forwarded(void)
     /* udp_gso stays at the library default (1) — the bridge must not touch
      * it even though cfg.udp_gso is 0 (Linux-only knob, set at call site). */
     ASSERT_EQ_INT(lc->udp_gso, 1, "udp_gso NOT bridged");
+    ASSERT_EQ_INT(lc->bufs.h3_body_buf_per_stream, 262144,
+                  "bufs.h3_body_buf_per_stream bridged");
+    ASSERT_EQ_INT(lc->bufs.blocked_buf_per_stream, 1048576,
+                  "bufs.blocked_buf_per_stream bridged");
+    ASSERT_EQ_INT(lc->bufs.blocked_buf_per_conn, 8388608,
+                  "bufs.blocked_buf_per_conn bridged");
+    ASSERT_EQ_INT(lc->bufs.max_recv_window, 6291456, "bufs.max_recv_window bridged");
 
     mqvpn_config_free(lc);
 }
@@ -147,6 +161,14 @@ test_defaults_and_fallbacks(void)
     ASSERT_EQ_INT(lc->tls_server_name[0], '\0', "tls_server_name NULL → unset");
     ASSERT_EQ_INT(lc->auth_key[0], '\0', "auth_key NULL → unset");
     ASSERT_EQ_INT(lc->recv_rate_limit, rrl_default, "recv_rate_limit 0 → untouched");
+    /* All-zero bufs bridge as zero rather than acquiring a library default:
+     * 0 already means "xquic's own default" for all four, and inventing one
+     * here would make the keys live before any value has been measured. */
+    ASSERT_EQ_INT(lc->bufs.h3_body_buf_per_stream, 0, "bufs zero stays zero (stream)");
+    ASSERT_EQ_INT(lc->bufs.blocked_buf_per_stream, 0, "bufs zero stays zero (blocked)");
+    ASSERT_EQ_INT(lc->bufs.blocked_buf_per_conn, 0,
+                  "bufs zero stays zero (blocked conn)");
+    ASSERT_EQ_INT(lc->bufs.max_recv_window, 0, "bufs zero stays zero (window)");
 
     /* remaining scheduler codepoints */
     cfg.scheduler = 1;

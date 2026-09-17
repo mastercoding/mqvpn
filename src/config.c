@@ -638,6 +638,19 @@ static const cfg_key_desc_t cfg_keys[] = {
             MQVPN_RECV_RATE_LIMIT_MAX),
     CFG_BOOL(SEC_ADVANCED, "UdpGso", "udp_gso", udp_gso),
     CFG_BOOL(SEC_ADVANCED, "UdpGro", "udp_gro", udp_gro),
+    /* Receive-buffering limits. 0 (the memset default) = leave xquic's own
+     * default alone, so a config naming none of these is unchanged. Maxima
+     * are type limits, not policy: xquic types the four buffer fields size_t
+     * and max_recv_window uint32_t — see src/buf_limits.h. Both client and
+     * server, unlike RecvRateLimit above. */
+    CFG_U64(SEC_ADVANCED, "H3BodyBufPerStream", "h3_body_buf_per_stream",
+            bufs.h3_body_buf_per_stream, MQVPN_BUF_LIMIT_MAX),
+    CFG_U64(SEC_ADVANCED, "BlockedBufPerStream", "blocked_buf_per_stream",
+            bufs.blocked_buf_per_stream, MQVPN_BUF_LIMIT_MAX),
+    CFG_U64(SEC_ADVANCED, "BlockedBufPerConn", "blocked_buf_per_conn",
+            bufs.blocked_buf_per_conn, MQVPN_BUF_LIMIT_MAX),
+    CFG_U64(SEC_ADVANCED, "MaxRecvWindow", "max_recv_window", bufs.max_recv_window,
+            MQVPN_MAX_RECV_WINDOW_MAX),
 };
 
 /* Shared typed store. Returns 0 on success, -1 on invalid value (caller
