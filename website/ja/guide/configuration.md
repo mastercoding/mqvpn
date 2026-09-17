@@ -344,9 +344,9 @@ JSON では `"hybrid"` オブジェクトに snake_case キーで指定します
 | `UdpGso` | 高スループット時に UDP 送信をカーネル GSO でバッチ化し、CPU 使用率を下げます。非対応カーネル（4.18 未満）では通常のバッチ送信に自動的にフォールバックします。Linux / Android のみ有効 — それ以外のプラットフォームでは効果がありません。`false` にすると以前のパケット単位の送信経路に戻ります | `true` |
 | `UdpGro` | 高スループット時に受信 UDP パケットをカーネル GRO でまとめて受け取り、CPU 使用率を下げます。非対応カーネル（5.0 未満）では 1 パケットずつの受信に自動的にフォールバックします。Linux のみ有効 — それ以外のプラットフォームでは効果がありません。`false` にすると以前の受信経路に戻ります | `true` |
 | `H3BodyBufPerStream` | 1 つのリクエストが保持できる HTTP/3 DATA ペイロードの上限（バイト）。`xqc_conn_settings_t.max_body_buf_per_stream` に設定されます。`RecvRateLimit` と違いクライアントとサーバの**両方**に適用されます。最大値は `4294967295` で、それを超える値は警告とともに拒否され `0` にフォールバックします。設定する前に表の下の注記を必ず読んでください | `0`（xquic 自身の既定値） |
-| `BlockedBufPerStream` | ストリーム単位の QPACK デコードブロックバッファ。`xqc_conn_settings_t.max_blocked_buf_per_stream` に設定されます。**超えるとコネクションが切断されます** — 設定する前に下の注記を読んでください。`0` はサーバで 1 MiB、クライアントでは無制限を意味します | `0` |
-| `BlockedBufPerConn` | 上と同じものを 1 コネクション全体で集計した上限で、`xqc_conn_settings_t.max_blocked_buf_per_conn` に設定されます。切断の振る舞いも同じです。`0` はサーバで 8 MiB、クライアントでは無制限を意味します | `0` |
-| `MaxRecvWindow` | **ストリーム単位**の受信ウィンドウの上限（バイト）。`xqc_conn_settings_t.max_recv_window` に設定されます。コネクションレベルのウィンドウではありません（それは `RecvRateLimit`）。最大値は `4294967295` | `0`（xquic 自身の既定値） |
+| `BlockedBufPerStream` | ストリーム単位の QPACK デコードブロックバッファ。`xqc_conn_settings_t.max_blocked_buf_per_stream` に設定されます。**超えるとコネクションが切断されます** — 設定する前に下の注記を読んでください。`0` はサーバで 1 MiB、クライアントでは無制限を意味します。最大値は `4294967295` で、それを超える値は警告とともに無視されます。クライアントではその結果、無制限のままになります | `0` |
+| `BlockedBufPerConn` | 上と同じものを 1 コネクション全体で集計した上限で、`xqc_conn_settings_t.max_blocked_buf_per_conn` に設定されます。切断の振る舞いも同じです。`0` はサーバで 8 MiB、クライアントでは無制限を意味します。最大値は `4294967295` で、それを超える値は警告とともに無視されます。クライアントではその結果、無制限のままになります | `0` |
+| `MaxRecvWindow` | **ストリーム単位**の受信ウィンドウの上限（バイト）。`xqc_conn_settings_t.max_recv_window` に設定されます。コネクションレベルのウィンドウではありません（それは `RecvRateLimit`）。最大値は `4294967295` で、それを超える値は警告とともに無視されます | `0`（xquic 自身の既定値） |
 
 JSON では `"advanced"` オブジェクトに snake_case キーで指定します（`recv_rate_limit`, `udp_gso`, `udp_gro`, `h3_body_buf_per_stream`, `blocked_buf_per_stream`, `blocked_buf_per_conn`, `max_recv_window`）。
 
